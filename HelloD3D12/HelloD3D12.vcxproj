@@ -129,20 +129,22 @@
   <ItemGroup>
     <ClCompile Include="..\Common\d3dApp.cpp" />
     <ClCompile Include="..\Common\d3dUtil.cpp" />
-    <ClCompile Include="..\Common\FrameResource.cpp" />
     <ClCompile Include="..\Common\GameTimer.cpp" />
+    <ClCompile Include="..\Common\GeometryGenerator.cpp" />
     <ClCompile Include="..\Common\MathHelper.cpp" />
     <ClCompile Include="Application.cpp" />
+    <ClCompile Include="FrameResource.cpp" />
     <ClCompile Include="ShapesApp.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Common\d3dApp.h" />
     <ClInclude Include="..\Common\d3dUtil.h" />
-    <ClInclude Include="..\Common\FrameResource.h" />
     <ClInclude Include="..\Common\GameTimer.h" />
+    <ClInclude Include="..\Common\GeometryGenerator.h" />
     <ClInclude Include="..\Common\MathHelper.h" />
     <ClInclude Include="..\Common\RenderItem.h" />
     <ClInclude Include="..\Common\UploadBuffer.h" />
+    <ClInclude Include="FrameResource.h" />
     <ClInclude Include="ShapesApp.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

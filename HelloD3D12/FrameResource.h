@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Common/FrameResource.h"
+#include "FrameResource.h"
 #include "../Common/MathHelper.h"
 #include "../Common/UploadBuffer.h"
 
@@ -20,7 +20,7 @@ struct PassConstants
     DirectX::XMFLOAT3 eyePos = { 0.0f, 0.0f, 0.0f };
     float cbPerObjectPad1 = 0.0f;
     DirectX::XMFLOAT2 renderTargetSize = { 0.0f, 0.0f };
-    DirectX::XMFLOAT2 InvRenderTargetSize = { 0.0f, 0.0f };
+    DirectX::XMFLOAT2 invRenderTargetSize = { 0.0f, 0.0f };
     float nearZ = 0.0f;
     float farZ = 0.0f;
     float totalTime = 0.0f;
@@ -30,7 +30,7 @@ struct PassConstants
 struct Vertex
 {
     DirectX::XMFLOAT3 pos;
-    DirectX::XMFLOAT3 color;
+    DirectX::XMFLOAT4 color;
 };
 
 struct FrameResource

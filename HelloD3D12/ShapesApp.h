@@ -1,23 +1,34 @@
 #pragma once
+#include "FrameResource.h"
+
 #include "../Common/d3dApp.h"
 #include "../Common/MathHelper.h"
 #include "../Common/UploadBuffer.h"
+
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 using namespace DirectX::PackedVector;
 
-struct Vertex
-{
-    XMFLOAT3 pos;
-    XMFLOAT4 color;
-};
 
-struct ObjectConstants
+struct RenderItem
 {
-    XMFLOAT4X4 worldViewProj = MathHelper::Identity4x4();
-};
+    RenderItem() = default;
 
+    XMFLOAT4X4 world = MathHelper::Identity4x4();
+
+    int numFramesDirty = gNumFrameResources;
+
+    UINT objCBIndex = -1;
+
+    MeshGeometry* geo = nullptr;
+
+    D3D12_PRIMITIVE_TOPOLOGY primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+
+    UINT indexCount = 0;
+    UINT startIndexLocation = 0;
+    int baseVertexLocation = 0;
+};
 
 class ShapesApp : public D3DApp {
 public:
@@ -38,35 +49,52 @@ private:
     virtual void OnMouseUp(WPARAM btnState, int x, int y) override;
     virtual void OnMouseMove(WPARAM btnState, int x, int y) override;
 
+    void OnKeyboardInput(const GameTimer& gt);
+    void UpdateCamera(const GameTimer& gt);
+    void UpdateObjectCBs(const GameTimer& gt);
+    void UpdateMainPassCB(const GameTimer& gt);
+
     void BuildDescriptorHeaps();
-    void BuildConstantBuffers();
+    void BuildConstantBufferViews();
     void BuildRootSignature();
-    void BuildShaderAndInputLayout();
-    void BuildBoxGeometry();
-    void BuildPSO();
+    void BuildShadersAndInputLayout();
+    void BuildShapeGeometry();
+    void BuildPSOs();
+    void BuildFrameResources();
+    void BuildRenderItems();
+    void DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& renderItems);
 
 private:
+    std::vector<std::unique_ptr<FrameResource>> mFrameResources;
+    FrameResource* mCurrFrameResource;
+    int mCurrFrameResourceIndex = 0;
+
     ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
-    ComPtr<ID3D12DescriptorHeap> mCbvHeap = nullptr;
+    ComPtr<ID3D12DescriptorHeap> mCBVDescriptorHeap = nullptr;
+    ComPtr<ID3D12DescriptorHeap> mSRVDescriptorHeap = nullptr;
 
-    std::unique_ptr<UploadBuffer<ObjectConstants>> mObjectCB = nullptr;
-
-    std::unique_ptr<MeshGeometry> mBoxGeo;
-
-    ComPtr<ID3DBlob> mvsByteCode = nullptr;
-    ComPtr<ID3DBlob> mpsByteCode = nullptr;
+    std::unordered_map<std::string, std::unique_ptr<MeshGeometry>> mGeometries;
+    std::unordered_map<std::string, ComPtr<ID3DBlob>> mShaders;
+    std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> mPSOs;
 
     std::vector<D3D12_INPUT_ELEMENT_DESC> mInputLayout;
 
-    ComPtr<ID3D12PipelineState> mPSO = nullptr;
+    std::vector<std::unique_ptr<RenderItem>> mAllRenderItems;
 
-    XMFLOAT4X4 mWorld = MathHelper::Identity4x4();
+    std::vector<RenderItem*> mOpaqueRenderItems;
+
+    PassConstants mMainPassCB;
+    UINT mPassCBVOffset = 0;
+
+    bool mIsWireframe = false;
+
+    XMFLOAT3 mEyePos = { 0.0f, 0.0f, 0.0f };
     XMFLOAT4X4 mView = MathHelper::Identity4x4();
     XMFLOAT4X4 mProj = MathHelper::Identity4x4();
 
     float mTheta = 1.5f * XM_PI;
-    float mPhi = XM_PIDIV4;
-    float mRadius = 5.0f;
+    float mPhi = 0.2f* XM_PI;
+    float mRadius = 15.0f;
 
     POINT mLastMousePos;
 };

@@ -13,3 +13,42 @@
 13. 创建命令分配器：pID3DDevice->CreateCommandAllocator
 14. 创建图形命令列表：pID3DDevice->CreateCommandList
 
+
+
+## 描述符堆
+DescriptorHeap描述符堆是描述符(也可叫理解为视图)的集合；
+描述符分为：
+
+- 渲染目标描述符（RTV: Render Target View）
+
+- 深度/模板缓冲区描述符（DSV: Depath Stencil View）
+
+- 常量缓冲区描述符（CBV: Constant Buffer View）
+
+- 着色器资源描述符(SRV: Shader Resource View)
+
+- 无序访问描述符（UAV: Unordered Access View）
+
+- 顶点缓冲区描述符（VBV: Vertex Buffer View）
+
+- 索引缓冲区描述（IBV: Index Buffer View）
+
+除了顶点和索引缓冲区不需要创建对应的描述符堆外，其他类型的描述符需要存放在对应类型的描述符堆里。
+RTV存放在以D3D12_DESCRIPTOR_HEAP_TYPE_RTV类型创建的描述符堆里；
+DSV存放在以D3D12_DESCRIPTOR_HEAP_TYPE_DSV类型创建的描述符堆里；
+Sampler存放在以D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER类型创建的描述符堆里；
+其中CBV、SRV、UAV混合存放在以D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV类型创建的描述符堆里。
+描述符中每项描述符的类型由描述符堆的type决定（`type可以是 D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV | D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER |  D3D12_DESCRIPTOR_HEAP_TYPE_RTV | D3D12_DESCRIPTOR_HEAP_TYPE_DSV`）；每个描述符的大小由设备决定，并通过设备的接口来查询；
+
+不同类型的描述符创建：
+RTV：ID3D12Device::CreateRenderTargetView
+DSV：ID3D12Device::CreateDepthStencilView
+SRV：ID3D12Device::CreateShaderResourceView
+CBV：ID3D12Device::CreateConstantBufferView
+UAV：ID3D12Device::CreateUnorderedAccessView
+Sampler：ID3D12Device::CreateSampler
+
+
+## 根签名
+
+

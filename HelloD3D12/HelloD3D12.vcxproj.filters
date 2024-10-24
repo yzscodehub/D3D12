@@ -33,7 +33,10 @@
     <ClCompile Include="..\Common\MathHelper.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="..\Common\FrameResource.cpp">
+    <ClCompile Include="..\Common\GeometryGenerator.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="FrameResource.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
@@ -56,10 +59,13 @@
     <ClInclude Include="..\Common\UploadBuffer.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="..\Common\FrameResource.h">
+    <ClInclude Include="..\Common\RenderItem.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="..\Common\RenderItem.h">
+    <ClInclude Include="..\Common\GeometryGenerator.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="FrameResource.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
