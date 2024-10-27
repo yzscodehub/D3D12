@@ -18,7 +18,13 @@
     <ClCompile Include="Application.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="ShapesApp.cpp">
+    <ClCompile Include="FrameResource.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="LandAndWavesApp.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Common\Camera.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="..\Common\d3dApp.cpp">
@@ -30,21 +36,24 @@
     <ClCompile Include="..\Common\GameTimer.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="..\Common\MathHelper.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="..\Common\GeometryGenerator.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="FrameResource.cpp">
+    <ClCompile Include="..\Common\MathHelper.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="..\Common\Camera.cpp">
+    <ClCompile Include="Waves.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ShapesApp.h">
+    <ClInclude Include="FrameResource.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="LandAndWavesApp.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\Camera.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="..\Common\d3dApp.h">
@@ -53,7 +62,13 @@
     <ClInclude Include="..\Common\d3dUtil.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="..\Common\d3dx12.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
     <ClInclude Include="..\Common\GameTimer.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Common\GeometryGenerator.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="..\Common\MathHelper.h">
@@ -62,19 +77,7 @@
     <ClInclude Include="..\Common\UploadBuffer.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="..\Common\RenderItem.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Common\GeometryGenerator.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="FrameResource.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Common\Camera.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Common\d3dx12.h">
+    <ClInclude Include="Waves.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
