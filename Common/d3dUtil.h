@@ -239,15 +239,19 @@ struct MaterialConstants
 struct Material
 {
     // Unique material name for lookup.
+    // 便于查找材质的唯一对应名称
     std::string Name;
 
     // Index into constant buffer corresponding to this material.
+    // 本材质的常量缓冲区索引
     int MatCBIndex = -1;
 
     // Index into SRV heap for diffuse texture.
+    // 漫反射纹理在SRV堆中的索引
     int DiffuseSrvHeapIndex = -1;
 
     // Index into SRV heap for normal texture.
+    // 法线贴图在SRV堆中的所应
     int NormalSrvHeapIndex = -1;
 
     // Dirty flag indicating the material has changed and we need to update the constant buffer.
@@ -257,9 +261,10 @@ struct Material
     int NumFramesDirty = gNumFrameResources;
 
     // Material constant buffer data used for shading.
-    DirectX::XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };
-    DirectX::XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };
-    float Roughness = .25f;
+    // 用于着色的材质常量缓冲区数据
+    DirectX::XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };   // 漫反射反射率
+    DirectX::XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };          // 材质熟悉
+    float Roughness = .25f;                                         // 粗糙度
     DirectX::XMFLOAT4X4 MatTransform = MathHelper::Identity4x4();
 };
 
