@@ -1,5 +1,5 @@
 #ifndef NUM_DIR_LIGHTS
-    #define NUM_DIR_LIGHTS 1
+    #define NUM_DIR_LIGHTS 3
 #endif
 
 #ifndef NUM_POINT_LIGHTS
@@ -16,6 +16,7 @@
 struct ConstBufferObject
 {
     float4x4 gWorld;
+    float4x4 gTexTransform;
 };
 
 struct ConstBufferMaterial
@@ -52,6 +53,7 @@ struct VertexIn
 {
     float3 pos : POSITION;
     float3 normal : NORMAL;
+    float2 texCoord : TEXCOORD;
 };
 
 struct VertexOut
@@ -59,8 +61,18 @@ struct VertexOut
     float4 posH : SV_POSITION;
     float3 posW : POSITION;
     float3 normal : NORMAL;
+    float2 texCoord : TEXCOORD;
 };
 
+
+Texture2D gDiffuseMap : register(t0);
+
+SamplerState gSamPointWrap          : register(s0);
+SamplerState gSamPointClamp         : register(s1);
+SamplerState gSamLinearWrap         : register(s2);
+SamplerState gSamLinearClamp        : register(s3);
+SamplerState gSamAnisotropicWrap    : register(s4);
+SamplerState gSamAnisotropicClamp   : register(s5);
 
 cbuffer ConstBuffer : register(b0)
 {
@@ -69,12 +81,12 @@ cbuffer ConstBuffer : register(b0)
 
 cbuffer ConstBuffer : register(b1)
 {
-    ConstBufferMaterial cbMaterial;
+    ConstBufferPass cbPass;
 };
 
 cbuffer ConstBuffer : register(b2)
 {
-    ConstBufferPass cbPass;
+    ConstBufferMaterial cbMaterial;
 };
 
 
@@ -82,39 +94,45 @@ VertexOut VS(VertexIn vin)
 {
     VertexOut vout;
     
-    // ½«¶¥µã±ä»»µ½ÊÀ½ç¿Õ¼ä
+    // å°†é¡¶ç‚¹å˜æ¢åˆ°ä¸–ç•Œç©ºé—´
     float4 worldPos = mul(float4(vin.pos, 1.0f), cbPerObject.gWorld);
     vout.posW = worldPos.xyx;
     
-    // TODO ¼ÙÉèÕâÀï½øĞĞµÄÊÇµÈ±ÈËõ·Å£¬·ñÔòÕâÀïĞèÒªÊ¹ÓÃÊÀ½ç¾ØÕóµÄÄæ×ªÖÃ¾ØÕó
+    // TODO å‡è®¾è¿™é‡Œè¿›è¡Œçš„æ˜¯ç­‰æ¯”ç¼©æ”¾ï¼Œå¦åˆ™è¿™é‡Œéœ€è¦ä½¿ç”¨ä¸–ç•ŒçŸ©é˜µçš„é€†è½¬ç½®çŸ©é˜µ
     vout.normal = mul(vin.normal, (float3x3) cbPerObject.gWorld);
     
-    // ½«¶¥µã±ä»»µ½Æë´Î²Ã¼ô¿Õ¼ä
+    // å°†é¡¶ç‚¹å˜æ¢åˆ°é½æ¬¡è£å‰ªç©ºé—´
     vout.posH = mul(worldPos, cbPass.gViewProj);
+    
+    // ä¸ºä¸‰è§’å½¢æ’å€¼è€Œè¾“å‡ºé¡¶ç‚¹å±æ€§
+    float4 texC = mul(float4(vin.texCoord, 0.0f, 1.0f), cbPerObject.gTexTransform);
+    vout.texCoord = mul(texC, cbMaterial.gMatTransform).xy;
     return vout;
 }
 
 
 float4 PS(VertexOut pin) : SV_TARGET
 {
-    // ¶Ô·¨Ïß²åÖµ¿ÉÄÜµ¼ÖÂÆä·Ç¹æ·¶»¯£¬Òò´ËĞèÒªÔÙ´Î¶ÔËü½øĞĞ¹æ·¶»¯´¦Àí
+    float4 diffuseAlbedo = gDiffuseMap.Sample(gSamAnisotropicWrap, pin.texCoord) * cbMaterial.gDiffuseAlbebo;
+    
+    // å¯¹æ³•çº¿æ’å€¼å¯èƒ½å¯¼è‡´å…¶éè§„èŒƒåŒ–ï¼Œå› æ­¤éœ€è¦å†æ¬¡å¯¹å®ƒè¿›è¡Œè§„èŒƒåŒ–å¤„ç†
     pin.normal = normalize(pin.normal);
     
-    // ¹âÏß¾­±íÃæÉÏÒ»µã·´Éäµ½¹Û²ìµãµÄÏòÁ¿
+    // å…‰çº¿ç»è¡¨é¢ä¸Šä¸€ç‚¹åå°„åˆ°è§‚å¯Ÿç‚¹çš„å‘é‡
     float3 toEye = normalize(cbPass.gEyePosW - pin.posW);
     
-    // ¼ä½Ó¹ØÕÕ
-    float4 ambient = cbPass.gAmbientLight * cbMaterial.gDiffuseAlbebo;
+    // é—´æ¥å…³ç…§
+    float4 ambient = cbPass.gAmbientLight * diffuseAlbedo;
     
     const float shininess = 1.0f - cbMaterial.gRoughness;
-    Material mat = { cbMaterial.gDiffuseAlbebo, cbMaterial.gFresnelR0, shininess };
+    Material mat = { diffuseAlbedo, cbMaterial.gFresnelR0, shininess };
     float3 shadowFactor = 1.0f;
     float4 lightingResult = ComputeLighting(cbPass.gLights, mat, pin.posW, pin.normal, toEye, shadowFactor);
     
     float4 litColor = ambient + lightingResult;
     
-    // ´ÓÂş·´Éä²ÄÖÊÖĞ»ñÈ¡alphaÖµµÄ³£¼ûÊÖ¶Î
-    litColor.a = cbMaterial.gDiffuseAlbebo.a;
+    // ä»æ¼«åå°„æè´¨ä¸­è·å–alphaå€¼çš„å¸¸è§æ‰‹æ®µ
+    litColor.a = diffuseAlbedo.a;
     
     return litColor;
 }

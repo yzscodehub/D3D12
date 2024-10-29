@@ -42,6 +42,15 @@ public:
     virtual bool Initialize();
     virtual LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+    static std::wstring GetAppPath() {
+        wchar_t path[MAX_PATH];
+        GetModuleFileName(NULL, path, MAX_PATH);
+        std::wstring exePath(path);
+        auto rf = exePath.rfind('\\');
+        exePath = exePath.substr(0, rf);
+        return exePath;
+    }
+
 protected:
     virtual void CreateRtvAndDsvDescriptorHeaps();
     virtual void OnResize();

@@ -16,6 +16,8 @@ struct RenderItem
 
     XMFLOAT4X4 world = MathHelper::Identity4x4();
 
+    XMFLOAT4X4 texTransform = MathHelper::Identity4x4();
+
     int numFramesDirty = gNumFrameResources;
 
     UINT objCBIndex = -1;
@@ -53,6 +55,7 @@ private:
     virtual void OnMouseMove(WPARAM btnState, int x, int y) override;
 
     void OnKeyboardInput(const GameTimer &gt);
+    void AnimateMaterials(const GameTimer &gt);
     void UpdateCamera(const GameTimer &gt);
     void UpdateObjectCBs(const GameTimer &gt);
     void UpdateMainPassCB(const GameTimer &gt);
@@ -62,17 +65,20 @@ private:
 
     void BuildLandGeometry();
     void BuildWaveGeometryBuffers();
+    void BuildBoxGeometry();
     void BuildRenderItems();
     void BuildMaterial();
+    void LoadTextures();
 
-    //void BuildDescriptorHeaps();
-    //void BuildConstantBufferViews();
+    void BuildDescriptorHeaps();
     void BuildRootSignature();
     void BuildShadersAndInputLayout();
     void BuildPSOs();
     void BuildFrameResources();
     void DrawRenderItems(
         ID3D12GraphicsCommandList *cmdList, const std::vector<RenderItem *> &renderItems);
+
+    std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GetStaticSamplers();
 
     float GetHillsHeight(float x, float z) const;
     XMFLOAT3 GetHillsNormal(float x, float z) const;
@@ -87,8 +93,12 @@ private:
     ComPtr<ID3D12DescriptorHeap> mSRVDescriptorHeap = nullptr;
 
     std::unordered_map<std::string, std::unique_ptr<MeshGeometry>> mGeometries;
+    std::unordered_map<std::string, std::unique_ptr<Material>> mMaterials;
+    std::unordered_map<std::string, std::unique_ptr<Texture>> mTextures;
+
     std::unordered_map<std::string, ComPtr<ID3DBlob>> mShaders;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> mPSOs;
+
 
     std::vector<D3D12_INPUT_ELEMENT_DESC> mInputLayout;
 
@@ -99,7 +109,6 @@ private:
     std::unique_ptr<Waves> mWaves;
     RenderItem *mWavesRenderItem = nullptr;
 
-    std::unordered_map<std::string, std::unique_ptr<Material>> mMaterials;
 
     PassConstants mMainPassCB;
     UINT mPassCBVOffset = 0;

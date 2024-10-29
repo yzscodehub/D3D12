@@ -2,29 +2,29 @@
 
 struct Light
 {
-    float3 strength;        // ¹âÇ¿¶È
-    float falloffStart;     // Ë¥¼õ   point/spot light only
-    float3 direction;       // ·½Ïò   directional/spot light only
-    float falloffEnd;       // Ë¥¼õ   point/spot light only
-    float3 position;        // Î»ÖÃ   point/spot light only
+    float3 strength;        // å…‰å¼ºåº¦
+    float falloffStart;     // è¡°å‡   point/spot light only
+    float3 direction;       // æ–¹å‘   directional/spot light only
+    float falloffEnd;       // è¡°å‡   point/spot light only
+    float3 position;        // ä½ç½®   point/spot light only
     float spotPower;        // spot light only
 };
 
 struct Material
 {
-    float4 diffuseAlbedo;   // Âş·´Éä·´ÕÕÂÊ
-    float3 fresnelR0;       // ²ÄÖÊÊôĞÔ(·ÆÄù¶û)
-    float snininess;        // ¹âÔó¶È,¹âÔó¶ÈÓë´Ö²Ú¶ÈÊÇÒ»¶ÔĞÔÖÊÏà·´µÄÊôĞÔ snininess = 1 - rougness
+    float4 diffuseAlbedo;   // æ¼«åå°„åç…§ç‡
+    float3 fresnelR0;       // æè´¨å±æ€§(è²æ¶…å°”)
+    float snininess;        // å…‰æ³½åº¦,å…‰æ³½åº¦ä¸ç²—ç³™åº¦æ˜¯ä¸€å¯¹æ€§è´¨ç›¸åçš„å±æ€§ snininess = 1 - rougness
 };
 
-// ÊµÏÖÒ»ÖÖÏßĞÔË¥¼õÒò×ÓµÄ¼ÆËã·½·¨£¬¿ÉÓÃÓÚµã¹âÔ´ºÍ¾Û¹âµÆ
+// å®ç°ä¸€ç§çº¿æ€§è¡°å‡å› å­çš„è®¡ç®—æ–¹æ³•ï¼Œå¯ç”¨äºç‚¹å…‰æºå’Œèšå…‰ç¯
 float CalcAttenuation(float d, float falloffStart, float falloffEnd)
 {
     return saturate((falloffEnd - d) / (falloffEnd - falloffStart));
 }
 
-// ´úÌæ·ÆÄù¶û·½³ÌµÄÊ¯Àï¿Ë½üËÆ¡£´Ëº¯Êı»ùÓÚ¹âÏòÁ¿LÓë±íÃæ·¨ÏßnÖ®¼äµÄ¼Ğ½Ç£¬²¢¸ù¾İ·ÆÄù¶ûĞ§Ó¦½üËÆµØ¼ÆËã³öÒÔnÎª·¨ÏßµÄ±íÃæËù·´Éä¹âµÄ°Ù·Ö±È¡£
-// R0 = ((n-1)/(n+1))^2,Ê½ÖĞµÄnÎªÕÛÉäÂÊ
+// ä»£æ›¿è²æ¶…å°”æ–¹ç¨‹çš„çŸ³é‡Œå…‹è¿‘ä¼¼ã€‚æ­¤å‡½æ•°åŸºäºå…‰å‘é‡Lä¸è¡¨é¢æ³•çº¿nä¹‹é—´çš„å¤¹è§’ï¼Œå¹¶æ ¹æ®è²æ¶…å°”æ•ˆåº”è¿‘ä¼¼åœ°è®¡ç®—å‡ºä»¥nä¸ºæ³•çº¿çš„è¡¨é¢æ‰€åå°„å…‰çš„ç™¾åˆ†æ¯”ã€‚
+// R0 = ((n-1)/(n+1))^2,å¼ä¸­çš„nä¸ºæŠ˜å°„ç‡
 float3 SchlickFresnel(float3 R0, float3 normal, float3 lightVec)
 {
     float cosIncidentAngle = saturate(dot(normal, lightVec));
@@ -33,92 +33,92 @@ float3 SchlickFresnel(float3 R0, float3 normal, float3 lightVec)
     return reflectPercent;
 }
 
-// ¼ÆËã·´Éäµ½¹Û²ìÕßÑÛÖĞµÄ¹âÁ¿£¬¸ÃÖµÎªÂş·´Éä¹âÁ¿Óë¾µÃæ¹âÁ¿µÄ×ÜºÍ
+// è®¡ç®—åå°„åˆ°è§‚å¯Ÿè€…çœ¼ä¸­çš„å…‰é‡ï¼Œè¯¥å€¼ä¸ºæ¼«åå°„å…‰é‡ä¸é•œé¢å…‰é‡çš„æ€»å’Œ
 float3 BlinnPhong(float3 lightStrength, float3 lightVec, float3 normal, float3 toEye, Material mat)
 {
     const float m = mat.snininess * 256.0f;
-    float3 halfVec = normalize(toEye + lightVec);   // °ë³ÌÏòÁ¿
+    float3 halfVec = normalize(toEye + lightVec);   // åŠç¨‹å‘é‡
     
-    float roughnessFactor = (m + 8.0f) * pow(max(dot(halfVec, normal), 0.0f), m) / 8.0f;    // ´Ö²Ú¶ÈÒò×Ó
-    float3 fresnelFector = SchlickFresnel(mat.fresnelR0, halfVec, lightVec);                // Ë¥¼õÒò×Ó
+    float roughnessFactor = (m + 8.0f) * pow(max(dot(halfVec, normal), 0.0f), m) / 8.0f;    // ç²—ç³™åº¦å› å­
+    float3 fresnelFector = SchlickFresnel(mat.fresnelR0, halfVec, lightVec);                // è¡°å‡å› å­
     
     float3 specAlbebo = roughnessFactor * fresnelFector;
-    // ¾¡¹ÜÎÒÃÇ½øĞĞµÄÊÇLDR(Low dynamic range£¬µÍ¶¯Ì¬·¶Î§)£¬µ«spec(¾µÃæ·´Éä)¹«Ê½µÃµ½µÄ½á¹ûÈÔ»á³¬³ö[0,1],Òò´ËÏÖ½«Æä°´±ÈÀıËõĞ¡Ò»Ğ©
+    // å°½ç®¡æˆ‘ä»¬è¿›è¡Œçš„æ˜¯LDR(Low dynamic rangeï¼Œä½åŠ¨æ€èŒƒå›´)ï¼Œä½†spec(é•œé¢åå°„)å…¬å¼å¾—åˆ°çš„ç»“æœä»ä¼šè¶…å‡º[0,1],å› æ­¤ç°å°†å…¶æŒ‰æ¯”ä¾‹ç¼©å°ä¸€äº›
     specAlbebo = specAlbebo / (specAlbebo + 1.0f);
     
     return (mat.diffuseAlbedo.rgb + specAlbebo) * lightStrength;
 }
 
-// ·½Ïò¹â
+// æ–¹å‘å…‰
 float3 ComputeDirectionalLight(Light light, Material mat, float3 normal, float3 toEye)
 {
-    // ¹âÏòÁ¿Óë¹âÏß´«²¥µÄ·½Ïò¸ÕºÃÏà·´
+    // å…‰å‘é‡ä¸å…‰çº¿ä¼ æ’­çš„æ–¹å‘åˆšå¥½ç›¸å
     float3 lightVec = -light.direction;
     
-    // Í¨¹ıÀÊ²®ÓàÏÒ¶¨ÂÉ°´±ÈÀı½µµÍ¹âÇ¿¶È
+    // é€šè¿‡æœ—ä¼¯ä½™å¼¦å®šå¾‹æŒ‰æ¯”ä¾‹é™ä½å…‰å¼ºåº¦
     float ndotl = max(dot(normal, lightVec), 0.0f);
     float3 lightStrength = light.strength * ndotl;
     
     return BlinnPhong(lightStrength, lightVec, normal, toEye, mat);
 }
 
-// µã¹âÔ´
+// ç‚¹å…‰æº
 float3 ComputePointLight(Light light, Material mat, float3 pos, float3 normal, float3 toEye)
 {
-    // ´Ó±íÃæÖ¸Ïò¹âÔ´µÄÏòÁ¿
+    // ä»è¡¨é¢æŒ‡å‘å…‰æºçš„å‘é‡
     float3 lightVec = light.position - pos;
     
-    // ´Ó±íÃæµ½¹âÔ´µÄ¾àÀë
+    // ä»è¡¨é¢åˆ°å…‰æºçš„è·ç¦»
     float d = length(lightVec);
     
-    // ·¶Î§¼ì²â
+    // èŒƒå›´æ£€æµ‹
     if (d > light.falloffEnd)
         return 0.0f;
     
     lightVec /= d;
     
-    // Í¨¹ıÀÊ²®ÓàÏÒ¶¨ÂÉ°´±ÈÀı½µµÍ¹âÇ¿¶È
+    // é€šè¿‡æœ—ä¼¯ä½™å¼¦å®šå¾‹æŒ‰æ¯”ä¾‹é™ä½å…‰å¼ºåº¦
     float ndotl = max(dot(normal, lightVec), 0.0f);
     float3 lightStrength = light.strength * ndotl;
     
-    // ¸ù¾İ¾àÀë¼ÆËã¹âµÄË¥¼õ
+    // æ ¹æ®è·ç¦»è®¡ç®—å…‰çš„è¡°å‡
     float att = CalcAttenuation(d, light.falloffStart, light.falloffEnd);
     lightStrength *= att;
     
     return BlinnPhong(lightStrength, lightVec, normal, toEye, mat);
 }
 
-// ¾Û¹âµÆ
+// èšå…‰ç¯
 float3 ComputeSpotLight(Light light, Material mat, float3 pos, float3 normal, float3 toEye)
 {
-    // ´Ó±íÃæÖ¸Ïò¹âÔ´µÄÏòÁ¿
+    // ä»è¡¨é¢æŒ‡å‘å…‰æºçš„å‘é‡
     float3 lightVec = light.position - pos;
     
-    // ´Ó±íÃæµ½¹âÔ´µÄ¾àÀë
+    // ä»è¡¨é¢åˆ°å…‰æºçš„è·ç¦»
     float d = length(lightVec);
     
-    // ·¶Î§¼ì²â
+    // èŒƒå›´æ£€æµ‹
     if (d > light.falloffEnd)
         return 0.0f;
     
     lightVec /= d;
     
-     // Í¨¹ıÀÊ²®ÓàÏÒ¶¨ÂÉ°´±ÈÀı½µµÍ¹âÇ¿¶È
+     // é€šè¿‡æœ—ä¼¯ä½™å¼¦å®šå¾‹æŒ‰æ¯”ä¾‹é™ä½å…‰å¼ºåº¦
     float ndotl = max(dot(normal, lightVec), 0.0f);
     float3 lightStrength = light.strength * ndotl;
     
-    // ¸ù¾İ¾àÀë¼ÆËã¹âµÄË¥¼õ
+    // æ ¹æ®è·ç¦»è®¡ç®—å…‰çš„è¡°å‡
     float att = CalcAttenuation(d, light.falloffStart, light.falloffEnd);
     lightStrength *= att;
     
-    // ¸ù¾İ¾Û¹âµÆÕÕÃ÷Ä£ĞÍ¶Ô¹âÇ¿½øĞĞËõ·Å´¦Àí
+    // æ ¹æ®èšå…‰ç¯ç…§æ˜æ¨¡å‹å¯¹å…‰å¼ºè¿›è¡Œç¼©æ”¾å¤„ç†
     float spotFactor = pow(max(dot(-lightVec, light.direction), 0.0f), light.spotPower);
     lightStrength *= spotFactor;
     
     return BlinnPhong(lightStrength, lightVec, normal, toEye, mat);
 }
 
-// µş¼Ó¶àÖÖ¹ØÕÕ
+// å åŠ å¤šç§å…³ç…§
 float4 ComputeLighting(Light lights[MaxLights], Material mat,
                        float3 pos, float3 normal, float3 toEye, 
                        float3 shadowFactor)
