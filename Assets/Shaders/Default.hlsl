@@ -43,8 +43,17 @@ struct ConstBufferPass
     float gFarZ;
     float gTotalTime;
     float gDeltaTime;
+    
+    // 环境光
     float4 gAmbientLight;
     
+    // Fog
+    float4 gFogColor;
+    float gFogStart;
+    float gFogRange;
+    float2 cbPerObjectPad2;
+    
+    // Lights
     Light gLights[MaxLights];
 };
 
@@ -115,11 +124,18 @@ float4 PS(VertexOut pin) : SV_TARGET
 {
     float4 diffuseAlbedo = gDiffuseMap.Sample(gSamAnisotropicWrap, pin.texCoord) * cbMaterial.gDiffuseAlbebo;
     
+#ifdef ALPHA_TEST
+    // 若alpha < 0.1 则抛弃该像素。我们要在着色器中尽早执行此项测试，以尽快检测出满足条件的像素并退出着色器，从而跳出后续的相关处理
+    clip(diffuseAlbedo.a - 0.1f);
+#endif
+    
     // 对法线插值可能导致其非规范化，因此需要再次对它进行规范化处理
     pin.normal = normalize(pin.normal);
     
     // 光线经表面上一点反射到观察点的向量
-    float3 toEye = normalize(cbPass.gEyePosW - pin.posW);
+    float3 toEye = cbPass.gEyePosW - pin.posW;
+    float distToEye = length(toEye);
+    toEye /= distToEye;
     
     // 间接关照
     float4 ambient = cbPass.gAmbientLight * diffuseAlbedo;
@@ -130,6 +146,11 @@ float4 PS(VertexOut pin) : SV_TARGET
     float4 lightingResult = ComputeLighting(cbPass.gLights, mat, pin.posW, pin.normal, toEye, shadowFactor);
     
     float4 litColor = ambient + lightingResult;
+    
+#ifdef FOG
+    float fogAmount = saturate((distToEye-cbPass.gFogStart)/cbPass.gFogRange);
+    litColor = lerp(litColor, cbPass.gFogColor, fogAmount);
+#endif
     
     // 从漫反射材质中获取alpha值的常见手段
     litColor.a = diffuseAlbedo.a;

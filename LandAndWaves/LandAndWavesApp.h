@@ -32,7 +32,11 @@ struct RenderItem
     int baseVertexLocation = 0;
 };
 
-enum class RenderLayer : int { Opaque = 0, Count };
+enum class RenderLayer : int { 
+    Opaque = 0,
+    Transparent,
+    AlphaTested,
+    Count };
 
 class LandAndWavesApp : public D3DApp
 {

@@ -29,6 +29,12 @@ struct PassConstants
 
     DirectX::XMFLOAT4 ambientLight = {0.0f, 0.0f, 0.0f, 1.0f};
 
+    // 允许应用程序在每一帧都能改变雾效参数，例如，我们可能在一天中的特定时间才使用雾效
+    DirectX::XMFLOAT4 gFogColor = {0.7f, 0.7f, 0.7f, 1.0f};
+    float gFogStart = 5.0f;
+    float gFogRange = 150.0f;
+    DirectX::XMFLOAT2 cbPerObjectPad2;
+
     // Indices [0, NUM_DIR_LIGHTS) are directional lights;
     // indices [NUM_DIR_LIGHTS, NUM_DIR_LIGHTS+NUM_POINT_LIGHTS) are point lights;
     // indices [NUM_DIR_LIGHTS+NUM_POINT_LIGHTS, NUM_DIR_LIGHTS+NUM_POINT_LIGHT+NUM_SPOT_LIGHTS) are spot lights for a maximum of MaxLights per object.

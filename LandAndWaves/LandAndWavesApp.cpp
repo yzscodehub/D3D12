@@ -29,7 +29,6 @@ bool LandAndWavesApp::Initialize()
     BuildRootSignature();
     BuildShadersAndInputLayout();
     BuildDescriptorHeaps();
-    //BuildConstantBufferViews();
     BuildPSOs();
 
     // 执行初始化命令
@@ -115,6 +114,12 @@ void LandAndWavesApp::Draw(const GameTimer &gt)
 
     DrawRenderItems(mCommandList.Get(), mRenderItemLayer[int(RenderLayer::Opaque)]);
 
+    mCommandList->SetPipelineState(mPSOs["alphaTested"].Get());
+    DrawRenderItems(mCommandList.Get(), mRenderItemLayer[int(RenderLayer::AlphaTested)]);
+
+    mCommandList->SetPipelineState(mPSOs["transparent"].Get());
+    DrawRenderItems(mCommandList.Get(), mRenderItemLayer[int(RenderLayer::Transparent)]);
+
     // 按照资源的用途指示其状态的转变, 此处将资源从渲染目标状态转换为呈现状态
     auto resourceBarrierRenderTargetToPresent = CD3DX12_RESOURCE_BARRIER::Transition(
         CurrentBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -164,8 +169,8 @@ void LandAndWavesApp::OnMouseMove(WPARAM btnState, int x, int y)
         mPhi = MathHelper::Clamp(mPhi, 0.1f, MathHelper::Pi - 0.1f);
     } else if ((btnState & MK_RBUTTON) != 0) {
         // Make each pixel correspond to 0.005 unit in the scene.
-        float dx = 0.005f * static_cast<float>(x - mLastMousePos.x);
-        float dy = 0.005f * static_cast<float>(y - mLastMousePos.y);
+        float dx = 0.2f * static_cast<float>(x - mLastMousePos.x);
+        float dy = 0.2f * static_cast<float>(y - mLastMousePos.y);
 
         // Update the camera radius based on input.
         mRadius += dx - dy;
@@ -285,11 +290,11 @@ void LandAndWavesApp::UpdateMainPassCB(const GameTimer &gt)
     mMainPassCB.deltaTime = gt.DeltaTime();
     mMainPassCB.ambientLight = {0.25f, 0.25f, 0.35f, 1.0f};
     mMainPassCB.lights[0].Direction = {0.57735f, -0.57735f, 0.57735f};
-    mMainPassCB.lights[0].Strength = {0.9f, 0.9f, 0.9f};
+    mMainPassCB.lights[0].Strength = {0.9f, 0.9f, 0.8f};
     mMainPassCB.lights[1].Direction = {-0.57735f, -0.57735f, 0.57735f};
-    mMainPassCB.lights[1].Strength = {0.5f, 0.5f, 0.5f};
+    mMainPassCB.lights[1].Strength = {0.3f, 0.3f, 0.3f};
     mMainPassCB.lights[2].Direction = {0.0f, -0.707f, -0.707f};
-    mMainPassCB.lights[2].Strength = {0.2f, 0.2f, 0.2f};
+    mMainPassCB.lights[2].Strength = {0.15f, 0.15f, 0.15f};
 
     auto currPassCB = mCurrFrameResource->passCB.get();
     currPassCB->CopyData(0, mMainPassCB);
@@ -562,16 +567,23 @@ void LandAndWavesApp::BuildShadersAndInputLayout()
 {
     HRESULT hr = S_OK;
 
-    /*wchar_t path[MAX_PATH];
-    GetModuleFileName(NULL, path, MAX_PATH);
-    std::wstring exePath(path);
-    auto rf = exePath.rfind('\\');
-    exePath = exePath.substr(0, rf);*/
+    const D3D_SHADER_MACRO defines[] = {
+        {"FOG", "1"},
+        {nullptr, nullptr},
+    };
+
+    const D3D_SHADER_MACRO alphaTestDefines[] = {
+        {"FOG", "1"},
+        {"ALPHA_TEST", "1"},
+        {nullptr, nullptr},
+    };
 
     mShaders["standardVS"] = d3dUtil::CompileShader(
         GetAppPath() + L"/Assets/Shaders/Default.hlsl", nullptr, "VS", "vs_5_0");
     mShaders["opaquePS"] = d3dUtil::CompileShader(
-        GetAppPath() + L"/Assets/Shaders/Default.hlsl", nullptr, "PS", "ps_5_0");
+        GetAppPath() + L"/Assets/Shaders/Default.hlsl", defines, "PS", "ps_5_0");
+    mShaders["alphaTestedPS"] = d3dUtil::CompileShader(
+        GetAppPath() + L"/Assets/Shaders/Default.hlsl", alphaTestDefines, "PS", "ps_5_0");
 
     mInputLayout
         = {{"POSITION",
@@ -599,6 +611,7 @@ void LandAndWavesApp::BuildShadersAndInputLayout()
 
 void LandAndWavesApp::BuildPSOs()
 {
+    // opaque PSO
     D3D12_GRAPHICS_PIPELINE_STATE_DESC opaquePSODesc{};
     ZeroMemory(&opaquePSODesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
     opaquePSODesc.InputLayout = {mInputLayout.data(), static_cast<uint32_t>(mInputLayout.size())};
@@ -627,11 +640,42 @@ void LandAndWavesApp::BuildPSOs()
     ThrowIfFailed(
         md3dDevice->CreateGraphicsPipelineState(&opaquePSODesc, IID_PPV_ARGS(&mPSOs["opaque"])));
 
+    // wireframe PSO
     auto opaqueWireframePSODesc = opaquePSODesc;
     opaqueWireframePSODesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
     opaqueWireframePSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(
         &opaqueWireframePSODesc, IID_PPV_ARGS(&mPSOs["opaque_wireframe"])));
+
+    // transparent PSO
+    auto transparentPSODesc = opaquePSODesc;
+    D3D12_RENDER_TARGET_BLEND_DESC transparentBlendDesc;
+    transparentBlendDesc.BlendEnable = true;
+    transparentBlendDesc.LogicOpEnable = false;
+    transparentBlendDesc.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+    transparentBlendDesc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+    transparentBlendDesc.BlendOp = D3D12_BLEND_OP_ADD;
+    transparentBlendDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
+    transparentBlendDesc.DestBlendAlpha = D3D12_BLEND_ZERO;
+    transparentBlendDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    transparentBlendDesc.LogicOp = D3D12_LOGIC_OP_NOOP;
+    transparentBlendDesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    transparentPSODesc.BlendState.RenderTarget[0] = transparentBlendDesc;
+    ThrowIfFailed(
+        md3dDevice
+            ->CreateGraphicsPipelineState(&transparentPSODesc, IID_PPV_ARGS(&mPSOs["transparent"])));
+
+    // alpha tested PSO
+    auto alphaTestedPSODesc = opaquePSODesc;
+    alphaTestedPSODesc.PS = {
+        mShaders["alphaTestedPS"]->GetBufferPointer(),
+        mShaders["alphaTestedPS"]->GetBufferSize(),
+    };
+    alphaTestedPSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    ThrowIfFailed(
+        md3dDevice
+            ->CreateGraphicsPipelineState(&alphaTestedPSODesc, IID_PPV_ARGS(&mPSOs["alphaTested"])));
 }
 
 void LandAndWavesApp::BuildFrameResources()
@@ -661,7 +705,7 @@ void LandAndWavesApp::BuildRenderItems()
 
     mWavesRenderItem = wavesRenderItem.get();
 
-    mRenderItemLayer[(int) RenderLayer::Opaque].emplace_back(mWavesRenderItem);
+    mRenderItemLayer[(int) RenderLayer::Transparent].emplace_back(mWavesRenderItem);
 
     auto gridRenderItem = std::make_unique<RenderItem>();
     gridRenderItem->world = MathHelper::Identity4x4();
@@ -686,7 +730,7 @@ void LandAndWavesApp::BuildRenderItems()
     boxRitem->startIndexLocation = boxRitem->geo->DrawArgs["box"].StartIndexLocation;
     boxRitem->baseVertexLocation = boxRitem->geo->DrawArgs["box"].BaseVertexLocation;
 
-    mRenderItemLayer[(int) RenderLayer::Opaque].push_back(boxRitem.get());
+    mRenderItemLayer[(int) RenderLayer::AlphaTested].push_back(boxRitem.get());
 
     mAllRenderItems.emplace_back(std::move(wavesRenderItem));
     mAllRenderItems.emplace_back(std::move(gridRenderItem));
@@ -708,8 +752,8 @@ void LandAndWavesApp::BuildMaterial()
     water->Name = "water";
     water->MatCBIndex = 1;
     water->DiffuseSrvHeapIndex = 1;
-    water->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-    water->FresnelR0 = XMFLOAT3(0.2f, 0.2f, 0.2f);
+    water->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 0.5f);
+    water->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
     water->Roughness = 0.0f;
 
     auto wirefence = std::make_unique<Material>();
@@ -730,7 +774,7 @@ void LandAndWavesApp::LoadTextures()
     std::vector<std::pair<std::string, std::wstring>> texInfo = {
         {"grassTex", L"/Assets/Textures/grass.dds"},
         {"waterTex", L"/Assets/Textures/water1.dds"},
-        {"fenceTex", L"/Assets/Textures/WoodCrate01.dds"},
+        {"fenceTex", L"/Assets/Textures/WireFence.dds"},
     };
 
     for (const auto &it : texInfo) {
