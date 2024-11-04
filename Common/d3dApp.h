@@ -51,6 +51,32 @@ public:
         return exePath;
     }
 
+    static std::string UnicodeToUTF8(const std::wstring &unicodeStr)
+    {
+        int len = WideCharToMultiByte(
+            CP_UTF8, 0, &unicodeStr[0], (int) unicodeStr.size(), NULL, 0, NULL, NULL);
+        if (len <= 0) {
+            return ""; // ×ª»»Ê§°Ü
+        }
+
+        std::string str(len, 0);
+        WideCharToMultiByte(
+            CP_UTF8, 0, &unicodeStr[0], (int) unicodeStr.size(), &str[0], len, NULL, NULL);
+        return str;
+    }
+
+    static std::wstring UTF8ToUnicode(const std::string &utf8Str)
+    {
+        int unicodeLength = MultiByteToWideChar(CP_UTF8, 0, utf8Str.c_str(), -1, NULL, 0);
+        if (unicodeLength <= 0) {
+            return L""; // ×ª»»Ê§°Ü
+        }
+
+        std::vector<wchar_t> unicodeStr(unicodeLength, 0);
+        MultiByteToWideChar(CP_UTF8, 0, utf8Str.c_str(), -1, unicodeStr.data(), unicodeLength);
+        return std::wstring(unicodeStr.data());
+    }
+
 protected:
     virtual void CreateRtvAndDsvDescriptorHeaps();
     virtual void OnResize();

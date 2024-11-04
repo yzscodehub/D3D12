@@ -34,8 +34,12 @@ struct RenderItem
 
 enum class RenderLayer : int { 
     Opaque = 0,
+    Mirrors,
+    Reflected,
     Transparent,
+    Shadow,
     AlphaTested,
+    AlphaTestedTreeSprites,
     Count };
 
 class LandAndWavesApp : public D3DApp
@@ -64,21 +68,28 @@ private:
     void UpdateObjectCBs(const GameTimer &gt);
     void UpdateMainPassCB(const GameTimer &gt);
     void UpdateMaterialCB(const GameTimer &gt);
+    void UpdateReflectedPassCB(const GameTimer &gt);
 
     void UpdateWaves(const GameTimer &gt);
 
     void BuildLandGeometry();
     void BuildWaveGeometryBuffers();
     void BuildBoxGeometry();
-    void BuildRenderItems();
+    void BuildRoomGeometry();
+    void BuildSkullGeometry();
+    void BuildTreeSpritesGeometry();
+
     void BuildMaterial();
     void LoadTextures();
 
+    void BuildRenderItems();
+
+    void BuildFrameResources();
     void BuildDescriptorHeaps();
     void BuildRootSignature();
     void BuildShadersAndInputLayout();
     void BuildPSOs();
-    void BuildFrameResources();
+
     void DrawRenderItems(
         ID3D12GraphicsCommandList *cmdList, const std::vector<RenderItem *> &renderItems);
 
@@ -103,8 +114,8 @@ private:
     std::unordered_map<std::string, ComPtr<ID3DBlob>> mShaders;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> mPSOs;
 
-
     std::vector<D3D12_INPUT_ELEMENT_DESC> mInputLayout;
+    std::vector<D3D12_INPUT_ELEMENT_DESC> mTreeSpriteInputLayout;
 
     std::vector<std::unique_ptr<RenderItem>> mAllRenderItems;
 
@@ -112,10 +123,14 @@ private:
 
     std::unique_ptr<Waves> mWaves;
     RenderItem *mWavesRenderItem = nullptr;
+    RenderItem *mSkullRenderItem = nullptr;
+    RenderItem *mReflectedSkullRenderItem = nullptr;
+    RenderItem *mShadowedSkullRenderItem = nullptr;
 
+    XMFLOAT3 mSkullTranslation = {0.0f, 1.0f, -5.0f};
 
     PassConstants mMainPassCB;
-    UINT mPassCBVOffset = 0;
+    PassConstants mReflectedPassCB;
 
     bool mIsWireframe = false;
 

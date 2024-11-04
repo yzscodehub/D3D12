@@ -63,27 +63,32 @@ struct ConstBufferPass
 struct VertexIn
 {
     float3 pos : POSITION;
-    float3 normal : NORMAL;
-    float2 texCoord : TEXCOORD;
+    float2 size : SIZE;
 };
 
 struct VertexOut
 {
-    float4 posH : SV_POSITION;
-    float3 posW : POSITION;
-    float3 normal : NORMAL;
-    float2 texCoord : TEXCOORD;
+    float3 center : POSITION;
+    float2 size : SIZE;
 };
 
+struct GeoOut
+{
+    float4 posH     : SV_Position;
+    float3 posW     : POSITIONT;
+    float3 normal   : NORMAL;
+    float2 texCoord : TEXCOORD;
+    uint   primID   : SV_PrimitiveID;
+};
 
-Texture2D gDiffuseMap : register(t0);
+Texture2DArray gTreeMapArray : register(t0);
 
-SamplerState gSamPointWrap          : register(s0);
-SamplerState gSamPointClamp         : register(s1);
-SamplerState gSamLinearWrap         : register(s2);
-SamplerState gSamLinearClamp        : register(s3);
-SamplerState gSamAnisotropicWrap    : register(s4);
-SamplerState gSamAnisotropicClamp   : register(s5);
+SamplerState gSamPointWrap : register(s0);
+SamplerState gSamPointClamp : register(s1);
+SamplerState gSamLinearWrap : register(s2);
+SamplerState gSamLinearClamp : register(s3);
+SamplerState gSamAnisotropicWrap : register(s4);
+SamplerState gSamAnisotropicClamp : register(s5);
 
 cbuffer ConstBuffer : register(b0)
 {
@@ -105,26 +110,62 @@ VertexOut VS(VertexIn vin)
 {
     VertexOut vout;
     
-    // 将顶点变换到世界空间
-    float4 worldPos = mul(float4(vin.pos, 1.0f), cbPerObject.gWorld);
-    vout.posW = worldPos.xyx;
+    // 直接将数据传入几何着色器
+    vout.center = vin.pos;
+    vout.size = vin.size;
     
-    // TODO 假设这里进行的是等比缩放，否则这里需要使用世界矩阵的逆转置矩阵
-    vout.normal = mul(vin.normal, (float3x3) cbPerObject.gWorld);
-    
-    // 将顶点变换到齐次裁剪空间
-    vout.posH = mul(worldPos, cbPass.gViewProj);
-    
-    // 为三角形插值而输出顶点属性
-    float4 texC = mul(float4(vin.texCoord, 0.0f, 1.0f), cbPerObject.gTexTransform);
-    vout.texCoord = mul(texC, cbMaterial.gMatTransform).xy;
     return vout;
 }
 
-
-float4 PS(VertexOut pin) : SV_TARGET
+// 由于我们要将每个顶点都扩展为一个四边形，因此每次调用几何着色器最多输出4个顶点
+[maxvertexcount(4)]
+void GS(point VertexOut gin[1], 
+        uint primID : SV_PrimitiveID, 
+        inout TriangleStream<GeoOut> triStream)
 {
-    float4 diffuseAlbedo = gDiffuseMap.Sample(gSamAnisotropicWrap, pin.texCoord) * cbMaterial.gDiffuseAlbebo;
+    // 计算Sprite的局部坐标系与世界空间的相对关系，以使公告牌与y轴对称且面向观察者
+    float3 up = float3(0.0f, 1.0f, 0.0f);
+    float3 look = cbPass.gEyePosW - gin[0].center;
+    look.y = 0.0f;  // 与y轴对称，以此使公告牌立于xz平面
+    look = normalize(look);
+    float3 right = cross(up, look);
+    
+    // 计算世界空间中三角形带的顶点
+    float halfWidth = 0.5f * gin[0].size.x;
+    float halfHeight = 0.5f * gin[0].size.y;
+    float4 vertices[4];
+    vertices[0] = float4(gin[0].center + halfWidth * right - halfHeight * up, 1.0f);
+    vertices[1] = float4(gin[0].center + halfWidth * right + halfHeight * up, 1.0f);
+    vertices[2] = float4(gin[0].center - halfWidth * right - halfHeight * up, 1.0f);
+    vertices[3] = float4(gin[0].center - halfWidth * right + halfHeight * up, 1.0f);
+    
+    float2 texCoords[4] =
+    {
+        float2(0.0f, 1.0f),
+        float2(0.0f, 0.0f),
+        float2(1.0f, 1.0f),
+        float2(1.0f, 0.0f),
+    };
+    
+    GeoOut gout;
+    [unroll]
+    for (int i = 0; i < 4; ++i)
+    {
+        gout.posH = mul(vertices[i], cbPass.gViewProj);
+        gout.posW = vertices[i].xyz;
+        gout.normal = look;
+        gout.texCoord = texCoords[i];
+        gout.primID = primID;
+        
+        triStream.Append(gout);
+    }
+}
+
+
+float4 PS(GeoOut pin) : SV_TARGET
+{
+    float3 uvw = float3(pin.texCoord, pin.primID % 3);
+    float4 diffuseAlbedo = gTreeMapArray.Sample(gSamAnisotropicWrap, uvw) * cbMaterial.gDiffuseAlbebo;
     
 #ifdef ALPHA_TEST
     // 若alpha < 0.1 则抛弃该像素。我们要在着色器中尽早执行此项测试，以尽快检测出满足条件的像素并退出着色器，从而跳出后续的相关处理
