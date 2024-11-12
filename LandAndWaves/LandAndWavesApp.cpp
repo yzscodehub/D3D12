@@ -52,14 +52,13 @@ void LandAndWavesApp::OnResize()
 {
     D3DApp::OnResize();
 
-    auto projective = XMMatrixPerspectiveFovLH(0.25f * MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
-    XMStoreFloat4x4(&mProj, projective);
+    mCamera.SetLens(0.25f * MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
 }
 
 void LandAndWavesApp::Update(const GameTimer &gt)
 {
     OnKeyboardInput(gt);
-    UpdateCamera(gt);
+    //UpdateCamera(gt);
 
     mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
     mCurrFrameResource = mFrameResources[mCurrFrameResourceIndex].get();
@@ -76,7 +75,7 @@ void LandAndWavesApp::Update(const GameTimer &gt)
     UpdateObjectCBs(gt);
     UpdateMainPassCB(gt);
     UpdateWaves(gt);
-    UpdateMaterialCB(gt);
+    UpdateMaterialBuffer(gt);
     UpdateReflectedPassCB(gt);
 }
 
@@ -112,12 +111,13 @@ void LandAndWavesApp::Draw(const GameTimer &gt)
 
     mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
 
-    //auto passCBIndex = mPassCBVOffset + mCurrFrameResourceIndex;
-    //auto passCBVHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(mCBVDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-    //passCBVHandle.Offset(passCBIndex, mCbvSrvUavDescriptorSize);
-    //mCommandList->SetGraphicsRootDescriptorTable(1, passCBVHandle);
-    auto resource = mCurrFrameResource->passCB->Resource();
-    mCommandList->SetGraphicsRootConstantBufferView(2, resource->GetGPUVirtualAddress());
+    auto curPasssResource = mCurrFrameResource->passCB->Resource();
+    mCommandList->SetGraphicsRootConstantBufferView(1, curPasssResource->GetGPUVirtualAddress());
+    mCommandList->SetGraphicsRootShaderResourceView(
+        2, mCurrFrameResource->materialBuffer->Resource()->GetGPUVirtualAddress());
+
+    mCommandList
+        ->SetGraphicsRootDescriptorTable(3, mSRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
     // 先绘制不透明物体
     DrawRenderItems(mCommandList.Get(), mRenderItemLayer[int(RenderLayer::Opaque)]);
@@ -126,8 +126,8 @@ void LandAndWavesApp::Draw(const GameTimer &gt)
     DrawRenderItems(mCommandList.Get(), mRenderItemLayer[int(RenderLayer::AlphaTested)]);
 
     // 绘制tree sprite
-    mCommandList->SetPipelineState(mPSOs["treeSprites"].Get());
-    DrawRenderItems(mCommandList.Get(), mRenderItemLayer[int(RenderLayer::AlphaTestedTreeSprites)]);
+    /*mCommandList->SetPipelineState(mPSOs["treeSprites"].Get());
+    DrawRenderItems(mCommandList.Get(), mRenderItemLayer[int(RenderLayer::AlphaTestedTreeSprites)]);*/
 
     // 将模板缓冲区中可见的镜面像素标记为1
     mCommandList->OMSetStencilRef(1);
@@ -137,12 +137,12 @@ void LandAndWavesApp::Draw(const GameTimer &gt)
     // 只绘制镜子范围内的镜像（即仅绘制模板缓冲区中标记为1的像素）
     // 注意我们必须使用两个单独的渲染过程常量缓冲区，一个存储物体镜像，另一个保存光照镜像
     UINT passCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(PassConstants));
-    mCommandList
-        ->SetGraphicsRootConstantBufferView(2, resource->GetGPUVirtualAddress() + 1 * passCBByteSize);
+    mCommandList->SetGraphicsRootConstantBufferView(
+        1, curPasssResource->GetGPUVirtualAddress() + 1 * passCBByteSize);
     mCommandList->SetPipelineState(mPSOs["drawStencilReflections"].Get());
     DrawRenderItems(mCommandList.Get(), mRenderItemLayer[int(RenderLayer::Reflected)]);
 
-    mCommandList->SetGraphicsRootConstantBufferView(2, resource->GetGPUVirtualAddress());
+    mCommandList->SetGraphicsRootConstantBufferView(1, curPasssResource->GetGPUVirtualAddress());
     mCommandList->OMSetStencilRef(0);
 
     // 绘制透明的镜面，使镜像可以与之融合
@@ -193,22 +193,8 @@ void LandAndWavesApp::OnMouseMove(WPARAM btnState, int x, int y)
         float dx = XMConvertToRadians(0.25f * static_cast<float>(x - mLastMousePos.x));
         float dy = XMConvertToRadians(0.25f * static_cast<float>(y - mLastMousePos.y));
 
-        // Update angles based on input to orbit camera around box.
-        mTheta += dx;
-        mPhi += dy;
-
-        // Restrict the angle mPhi.
-        mPhi = MathHelper::Clamp(mPhi, 0.1f, MathHelper::Pi - 0.1f);
-    } else if ((btnState & MK_RBUTTON) != 0) {
-        // Make each pixel correspond to 0.005 unit in the scene.
-        float dx = 0.2f * static_cast<float>(x - mLastMousePos.x);
-        float dy = 0.2f * static_cast<float>(y - mLastMousePos.y);
-
-        // Update the camera radius based on input.
-        mRadius += dx - dy;
-
-        // Restrict the radius.
-        mRadius = MathHelper::Clamp(mRadius, 5.0f, 150.0f);
+        mCamera.Pitch(dy);
+        mCamera.RotateY(dx);
     }
 
     mLastMousePos.x = x;
@@ -223,27 +209,45 @@ void LandAndWavesApp::OnKeyboardInput(const GameTimer &gt)
         mIsWireframe = false;
 
     const float dt = gt.DeltaTime();
+    if (GetAsyncKeyState(VK_LEFT) & 0x8000 || GetAsyncKeyState('A') & 0x8000) {
+        mCamera.Strafe(-10.0f * dt);
+    }
+
+    if (GetAsyncKeyState(VK_RIGHT) & 0x8000 || GetAsyncKeyState('D') & 0x8000) {
+        mCamera.Strafe(10.0f * dt);
+    }
+
+    if (GetAsyncKeyState(VK_UP) & 0x8000 || GetAsyncKeyState('W') & 0x8000) {
+        mCamera.Walk(10.0f * dt);
+    }
+
+    if (GetAsyncKeyState(VK_DOWN) & 0x8000 || GetAsyncKeyState('S') & 0x8000) {
+        mCamera.Walk(-10.0f * dt);
+    }
+
+    mCamera.UpdateViewMatrix();
+
+    ChangeSkullTranslation(gt);
+}
+
+void LandAndWavesApp::ChangeSkullTranslation(const GameTimer &gt)
+{
+    const float dt = gt.DeltaTime();
     if (GetAsyncKeyState(VK_LEFT) & 0x8000) {
-        mSunTheta -= 1.0f * dt;
         mSkullTranslation.x -= 1.0f * dt;
     }
 
     if (GetAsyncKeyState(VK_RIGHT) & 0x8000) {
-        mSunTheta += 1.0f * dt;
         mSkullTranslation.x += 1.0f * dt;
     }
 
     if (GetAsyncKeyState(VK_UP) & 0x8000) {
-        mSunPhi -= 1.0f * dt;
         mSkullTranslation.y += 1.0f * dt;
     }
 
     if (GetAsyncKeyState(VK_DOWN) & 0x8000) {
-        mSunPhi += 1.0f * dt;
         mSkullTranslation.y -= 1.0f * dt;
     }
-
-    mSunPhi = MathHelper::Clamp(mSunPhi, 0.1f, XM_PIDIV2);
 
     // Don't let user move below ground plane.
     mSkullTranslation.y = MathHelper::Max(mSkullTranslation.y, 0.0f);
@@ -297,21 +301,21 @@ void LandAndWavesApp::AnimateMaterials(const GameTimer &gt)
     waterMat->NumFramesDirty = gNumFrameResources;
 }
 
-void LandAndWavesApp::UpdateCamera(const GameTimer &gt)
-{
-    // 将球坐标转换为笛卡尔坐标
-    mEyePos.x = mRadius * sinf(mPhi) * cosf(mTheta);
-    mEyePos.z = mRadius * sinf(mPhi) * sinf(mTheta);
-    mEyePos.y = mRadius * cosf(mPhi);
-
-    // 构建观察矩阵
-    auto pos = XMVectorSet(mEyePos.x, mEyePos.y, mEyePos.z, 1.0f);
-    auto target = XMVectorZero();
-    auto up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-
-    auto view = XMMatrixLookAtLH(pos, target, up);
-    XMStoreFloat4x4(&mView, view);
-}
+//void LandAndWavesApp::UpdateCamera(const GameTimer &gt)
+//{
+//    // 将球坐标转换为笛卡尔坐标
+//    mEyePos.x = mRadius * sinf(mPhi) * cosf(mTheta);
+//    mEyePos.z = mRadius * sinf(mPhi) * sinf(mTheta);
+//    mEyePos.y = mRadius * cosf(mPhi);
+//
+//    // 构建观察矩阵
+//    auto pos = XMVectorSet(mEyePos.x, mEyePos.y, mEyePos.z, 1.0f);
+//    auto target = XMVectorZero();
+//    auto up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+//
+//    auto view = XMMatrixLookAtLH(pos, target, up);
+//    XMStoreFloat4x4(&mView, view);
+//}
 
 void LandAndWavesApp::UpdateObjectCBs(const GameTimer &gt)
 {
@@ -325,6 +329,8 @@ void LandAndWavesApp::UpdateObjectCBs(const GameTimer &gt)
             auto texTransform = XMLoadFloat4x4(&item->texTransform);
             XMStoreFloat4x4(&objConstans.texTransform, XMMatrixTranspose(texTransform));
 
+            objConstans.materialIndex = item->mat->MatCBIndex;
+
             currObjectCB->CopyData(item->objCBIndex, objConstans);
             --item->numFramesDirty;
         }
@@ -333,8 +339,8 @@ void LandAndWavesApp::UpdateObjectCBs(const GameTimer &gt)
 
 void LandAndWavesApp::UpdateMainPassCB(const GameTimer &gt)
 {
-    auto view = XMLoadFloat4x4(&mView);
-    auto proj = XMLoadFloat4x4(&mProj);
+    auto view = mCamera.GetView();
+    auto proj = mCamera.GetProj();
     auto viewProj = XMMatrixMultiply(view, proj);
 
     auto invView = XMMatrixInverse(&XMMatrixDeterminant(view), view);
@@ -348,7 +354,7 @@ void LandAndWavesApp::UpdateMainPassCB(const GameTimer &gt)
     XMStoreFloat4x4(&mMainPassCB.invProj, XMMatrixTranspose(invProj));
     XMStoreFloat4x4(&mMainPassCB.invViewProj, XMMatrixTranspose(invViewProj));
 
-    mMainPassCB.eyePos = mEyePos;
+    mMainPassCB.eyePos = mCamera.GetPosition3f();
     mMainPassCB.renderTargetSize = XMFLOAT2((float) mClientWidth, (float) mClientHeight);
     mMainPassCB.invRenderTargetSize = XMFLOAT2(1.0f / mClientWidth, 1.0f / mClientHeight);
     mMainPassCB.nearZ = 1.0f;
@@ -367,23 +373,25 @@ void LandAndWavesApp::UpdateMainPassCB(const GameTimer &gt)
     currPassCB->CopyData(0, mMainPassCB);
 }
 
-void LandAndWavesApp::UpdateMaterialCB(const GameTimer &gt)
+void LandAndWavesApp::UpdateMaterialBuffer(const GameTimer &gt)
 {
-    auto materialCB = mCurrFrameResource->materialCB.get();
+    auto currMaterialBuffer = mCurrFrameResource->materialBuffer.get();
     for (const auto &it : mMaterials) {
         auto material = it.second.get();
+        if (material->NumFramesDirty > 0) {
+            MaterialData mc;
+            mc.diffuseAlbedo = material->DiffuseAlbedo;
+            mc.fresnelR0 = material->FresnelR0;
+            mc.roughness = material->Roughness;
+            mc.diffuseMapIndex = material->DiffuseSrvHeapIndex;
 
-        MaterialConstants mc;
-        mc.DiffuseAlbedo = material->DiffuseAlbedo;
-        mc.FresnelR0 = material->FresnelR0;
-        mc.Roughness = material->Roughness;
+            XMMATRIX matTransform = XMLoadFloat4x4(&material->MatTransform);
+            XMStoreFloat4x4(&mc.matTransform, XMMatrixTranspose(matTransform));
 
-        XMMATRIX matTransform = XMLoadFloat4x4(&material->MatTransform);
-        XMStoreFloat4x4(&mc.MatTransform, XMMatrixTranspose(matTransform));
+            currMaterialBuffer->CopyData(material->MatCBIndex, mc);
 
-        materialCB->CopyData(material->MatCBIndex, mc);
-
-        --material->NumFramesDirty;
+            --material->NumFramesDirty;
+        }
     }
 }
 
@@ -816,7 +824,7 @@ void LandAndWavesApp::BuildDescriptorHeaps()
 {
     // 创建描述符堆`
     D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc;
-    srvHeapDesc.NumDescriptors = mTextures.size();
+    srvHeapDesc.NumDescriptors = mTextures.size() - 1;
     srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     srvHeapDesc.NodeMask = 0;
@@ -834,9 +842,6 @@ void LandAndWavesApp::BuildDescriptorHeaps()
         mTextures["iceTex"]->Resource.Get(),
         mTextures["white1x1Tex"]->Resource.Get(),
     };
-    auto grassTex = mTextures["grassTex"]->Resource;
-    auto waterTex = mTextures["waterTex"]->Resource;
-    auto fenceTex = mTextures["fenceTex"]->Resource;
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -851,39 +856,28 @@ void LandAndWavesApp::BuildDescriptorHeaps()
     }
 
     // 纹理数组
-    auto treeArrayTex = mTextures["treeArrayTex"]->Resource;
+    /*auto treeArrayTex = mTextures["treeArrayTex"]->Resource;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
     srvDesc.Format = treeArrayTex->GetDesc().Format;
     srvDesc.Texture2DArray.MostDetailedMip = 0;
     srvDesc.Texture2DArray.MipLevels = -1;
     srvDesc.Texture2DArray.FirstArraySlice = 0;
     srvDesc.Texture2DArray.ArraySize = treeArrayTex->GetDesc().DepthOrArraySize;
-    md3dDevice->CreateShaderResourceView(treeArrayTex.Get(), &srvDesc, handle);
+    md3dDevice->CreateShaderResourceView(treeArrayTex.Get(), &srvDesc, handle);*/
 }
 
 void LandAndWavesApp::BuildRootSignature()
 {
-    // 创建描述符表
-    //CD3DX12_DESCRIPTOR_RANGE cbvTable0;
-    //cbvTable0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
-
-    //CD3DX12_DESCRIPTOR_RANGE cbvTable1;
-    //cbvTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 1);
-
-    //// 根参数可以是描述符表、根描述符或根常量
-    //CD3DX12_ROOT_PARAMETER slotRootParameter[2];
-    //slotRootParameter[0].InitAsDescriptorTable(1, &cbvTable0);
-    //slotRootParameter[1].InitAsDescriptorTable(1, &cbvTable1);
-
-    CD3DX12_DESCRIPTOR_RANGE srvTable;
-    srvTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+    CD3DX12_DESCRIPTOR_RANGE texTable;
+    texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, mTextures.size(), 0);
 
     CD3DX12_ROOT_PARAMETER slotRootParameter[4];
-    slotRootParameter[0]
-        .InitAsDescriptorTable(1, &srvTable, D3D12_SHADER_VISIBILITY_PIXEL); // srvTabel
-    slotRootParameter[1].InitAsConstantBufferView(0);                        // objectCBV
-    slotRootParameter[2].InitAsConstantBufferView(1);                        // passCBV
-    slotRootParameter[3].InitAsConstantBufferView(2);                        // materialCBV
+    // 按变更频率由高到低排列
+    slotRootParameter[0].InitAsConstantBufferView(0);    // objectCBV
+    slotRootParameter[1].InitAsConstantBufferView(1);    // passCBV
+    slotRootParameter[2].InitAsShaderResourceView(0, 1); // materialBuffer
+    slotRootParameter[3]
+        .InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL); // srvTabel
 
     auto staticSamplers = GetStaticSamplers();
 
@@ -931,18 +925,18 @@ void LandAndWavesApp::BuildShadersAndInputLayout()
     };
 
     mShaders["standardVS"] = d3dUtil::CompileShader(
-        GetAppPath() + L"/Assets/Shaders/Default.hlsl", nullptr, "VS", "vs_5_0");
+        GetAppPath() + L"/Assets/Shaders/Default.hlsl", nullptr, "VS", "vs_5_1");
     mShaders["opaquePS"] = d3dUtil::CompileShader(
-        GetAppPath() + L"/Assets/Shaders/Default.hlsl", defines, "PS", "ps_5_0");
+        GetAppPath() + L"/Assets/Shaders/Default.hlsl", defines, "PS", "ps_5_1");
     mShaders["alphaTestedPS"] = d3dUtil::CompileShader(
-        GetAppPath() + L"/Assets/Shaders/Default.hlsl", alphaTestDefines, "PS", "ps_5_0");
+        GetAppPath() + L"/Assets/Shaders/Default.hlsl", alphaTestDefines, "PS", "ps_5_1");
 
     mShaders["treeSpriteVS"] = d3dUtil::CompileShader(
-        GetAppPath() + L"/Assets/Shaders/TreeSprite.hlsl", nullptr, "VS", "vs_5_0");
+        GetAppPath() + L"/Assets/Shaders/TreeSprite.hlsl", nullptr, "VS", "vs_5_1");
     mShaders["treeSpriteGS"] = d3dUtil::CompileShader(
-        GetAppPath() + L"/Assets/Shaders/TreeSprite.hlsl", nullptr, "GS", "gs_5_0");
+        GetAppPath() + L"/Assets/Shaders/TreeSprite.hlsl", nullptr, "GS", "gs_5_1");
     mShaders["treeSpritePS"] = d3dUtil::CompileShader(
-        GetAppPath() + L"/Assets/Shaders/TreeSprite.hlsl", alphaTestDefines, "PS", "ps_5_0");
+        GetAppPath() + L"/Assets/Shaders/TreeSprite.hlsl", alphaTestDefines, "PS", "ps_5_1");
 
     mInputLayout
         = {{"POSITION",
@@ -1141,29 +1135,26 @@ void LandAndWavesApp::BuildPSOs()
 
     // tree sprites PSO
     auto treeSpritePSODesc = opaquePSODesc;
-    treeSpritePSODesc.VS = 
-    {
+    treeSpritePSODesc.VS = {
         reinterpret_cast<BYTE *>(mShaders["treeSpriteVS"]->GetBufferPointer()),
         mShaders["treeSpriteVS"]->GetBufferSize(),
     };
 
-    treeSpritePSODesc.GS = 
-    {
+    treeSpritePSODesc.GS = {
         reinterpret_cast<BYTE *>(mShaders["treeSpriteGS"]->GetBufferPointer()),
         mShaders["treeSpriteGS"]->GetBufferSize(),
     };
 
-    treeSpritePSODesc.PS = 
-    {
+    treeSpritePSODesc.PS = {
         reinterpret_cast<BYTE *>(mShaders["treeSpritePS"]->GetBufferPointer()),
         mShaders["treeSpritePS"]->GetBufferSize(),
     };
     treeSpritePSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
-    treeSpritePSODesc.InputLayout = {mTreeSpriteInputLayout.data(), (UINT)mTreeSpriteInputLayout.size()};
+    treeSpritePSODesc.InputLayout
+        = {mTreeSpriteInputLayout.data(), (UINT) mTreeSpriteInputLayout.size()};
     treeSpritePSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    ThrowIfFailed(
-        md3dDevice->CreateGraphicsPipelineState(&treeSpritePSODesc, IID_PPV_ARGS(&mPSOs["treeSprites"])));
-
+    /*ThrowIfFailed(
+        md3dDevice->CreateGraphicsPipelineState(&treeSpritePSODesc, IID_PPV_ARGS(&mPSOs["treeSprites"])));*/
 }
 
 void LandAndWavesApp::BuildFrameResources()
@@ -1420,10 +1411,9 @@ void LandAndWavesApp::DrawRenderItems(
     ID3D12GraphicsCommandList *cmdList, const std::vector<RenderItem *> &renderItems)
 {
     auto objCbByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-    auto matCbByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(MaterialConstants));
 
     auto resourceObj = mCurrFrameResource->objectCB->Resource();
-    auto resourceMat = mCurrFrameResource->materialCB->Resource();
+    auto resourceMat = mCurrFrameResource->materialBuffer->Resource();
 
     for (const auto &item : renderItems) {
         cmdList->IASetIndexBuffer(&item->geo->IndexBufferView());
@@ -1432,15 +1422,8 @@ void LandAndWavesApp::DrawRenderItems(
 
         auto objCBAddress = resourceObj->GetGPUVirtualAddress();
         objCBAddress += item->objCBIndex * objCbByteSize;
-        auto materialCBAddress = resourceMat->GetGPUVirtualAddress();
-        materialCBAddress += item->mat->MatCBIndex * matCbByteSize;
-        CD3DX12_GPU_DESCRIPTOR_HANDLE texAddress(
-            mSRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-        texAddress.Offset(item->mat->DiffuseSrvHeapIndex, mCbvSrvUavDescriptorSize);
 
-        cmdList->SetGraphicsRootDescriptorTable(0, texAddress);
-        cmdList->SetGraphicsRootConstantBufferView(1, objCBAddress);
-        cmdList->SetGraphicsRootConstantBufferView(3, materialCBAddress);
+        cmdList->SetGraphicsRootConstantBufferView(0, objCBAddress);
 
         cmdList->DrawIndexedInstanced(
             item->indexCount, 1, item->startIndexLocation, item->baseVertexLocation, 0);

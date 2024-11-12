@@ -15,48 +15,48 @@
 // 每帧都在变化的单个模型的常量数据
 struct ConstBufferObject
 {
-    float4x4 gWorld;
-    float4x4 gTexTransform;
+    float4x4 world;
+    float4x4 texTransform;
 };
 
 // 每种材质都各有区别的常量数据
 struct ConstBufferMaterial
 {
-    float4 gDiffuseAlbebo;
-    float3 gFresnelR0;
-    float gRoughness;
-    float4x4 gMatTransform;
+    float4 diffuseAlbebo;
+    float3 fresnelR0;
+    float roughness;
+    float4x4 matTransform;
 };
 
 // 绘制过程中所用的杂项常量数据
 struct ConstBufferPass
 {
-    float4x4 gView;
-    float4x4 gInvView;
-    float4x4 gProj;
-    float4x4 gInvProj;
-    float4x4 gViewProj;
-    float4x4 gInvViewProj;
-    float3 gEyePosW;
+    float4x4 view;
+    float4x4 invView;
+    float4x4 proj;
+    float4x4 invProj;
+    float4x4 viewProj;
+    float4x4 invViewProj;
+    float3 eyePosW;
     float cbPerObjectPad1;
-    float2 gRenderTargetSize;
-    float2 gInvRenderTargetSize;
-    float gNearZ;
-    float gFarZ;
-    float gTotalTime;
-    float gDeltaTime;
+    float2 renderTargetSize;
+    float2 invRenderTargetSize;
+    float nearZ;
+    float farZ;
+    float totalTime;
+    float deltaTime;
     
     // 环境光
-    float4 gAmbientLight;
+    float4 ambientLight;
     
     // Fog
-    float4 gFogColor;
-    float gFogStart;
-    float gFogRange;
+    float4 fogColor;
+    float fogStart;
+    float fogRange;
     float2 cbPerObjectPad2;
     
     // Lights
-    Light gLights[MaxLights];
+    Light lights[MaxLights];
 };
 
 
@@ -81,7 +81,7 @@ struct GeoOut
     uint   primID   : SV_PrimitiveID;
 };
 
-Texture2DArray gTreeMapArray : register(t0);
+Texture2DArray gTreeMapArray : register(t0, space1);
 
 SamplerState gSamPointWrap : register(s0);
 SamplerState gSamPointClamp : register(s1);
@@ -125,7 +125,7 @@ void GS(point VertexOut gin[1],
 {
     // 计算Sprite的局部坐标系与世界空间的相对关系，以使公告牌与y轴对称且面向观察者
     float3 up = float3(0.0f, 1.0f, 0.0f);
-    float3 look = cbPass.gEyePosW - gin[0].center;
+    float3 look = cbPass.eyePosW - gin[0].center;
     look.y = 0.0f;  // 与y轴对称，以此使公告牌立于xz平面
     look = normalize(look);
     float3 right = cross(up, look);
@@ -151,7 +151,7 @@ void GS(point VertexOut gin[1],
     [unroll]
     for (int i = 0; i < 4; ++i)
     {
-        gout.posH = mul(vertices[i], cbPass.gViewProj);
+        gout.posH = mul(vertices[i], cbPass.viewProj);
         gout.posW = vertices[i].xyz;
         gout.normal = look;
         gout.texCoord = texCoords[i];
@@ -165,7 +165,7 @@ void GS(point VertexOut gin[1],
 float4 PS(GeoOut pin) : SV_TARGET
 {
     float3 uvw = float3(pin.texCoord, pin.primID % 3);
-    float4 diffuseAlbedo = gTreeMapArray.Sample(gSamAnisotropicWrap, uvw) * cbMaterial.gDiffuseAlbebo;
+    float4 diffuseAlbedo = gTreeMapArray.Sample(gSamAnisotropicWrap, uvw) * cbMaterial.diffuseAlbebo;
     
 #ifdef ALPHA_TEST
     // 若alpha < 0.1 则抛弃该像素。我们要在着色器中尽早执行此项测试，以尽快检测出满足条件的像素并退出着色器，从而跳出后续的相关处理
@@ -176,23 +176,23 @@ float4 PS(GeoOut pin) : SV_TARGET
     pin.normal = normalize(pin.normal);
     
     // 光线经表面上一点反射到观察点的向量
-    float3 toEye = cbPass.gEyePosW - pin.posW;
+    float3 toEye = cbPass.eyePosW - pin.posW;
     float distToEye = length(toEye);
     toEye /= distToEye;
     
     // 间接关照
-    float4 ambient = cbPass.gAmbientLight * diffuseAlbedo;
+    float4 ambient = cbPass.ambientLight * diffuseAlbedo;
     
-    const float shininess = 1.0f - cbMaterial.gRoughness;
-    Material mat = { diffuseAlbedo, cbMaterial.gFresnelR0, shininess };
+    const float shininess = 1.0f - cbMaterial.roughness;
+    Material mat = { diffuseAlbedo, cbMaterial.fresnelR0, shininess };
     float3 shadowFactor = 1.0f;
-    float4 lightingResult = ComputeLighting(cbPass.gLights, mat, pin.posW, pin.normal, toEye, shadowFactor);
+    float4 lightingResult = ComputeLighting(cbPass.lights, mat, pin.posW, pin.normal, toEye, shadowFactor);
     
     float4 litColor = ambient + lightingResult;
     
 #ifdef FOG
-    float fogAmount = saturate((distToEye-cbPass.gFogStart)/cbPass.gFogRange);
-    litColor = lerp(litColor, cbPass.gFogColor, fogAmount);
+    float fogAmount = saturate((distToEye-cbPass.fogStart)/cbPass.fogRange);
+    litColor = lerp(litColor, cbPass.fogColor, fogAmount);
 #endif
     
     // 从漫反射材质中获取alpha值的常见手段

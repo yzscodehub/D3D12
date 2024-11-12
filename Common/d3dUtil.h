@@ -251,7 +251,7 @@ struct Material
     int DiffuseSrvHeapIndex = -1;
 
     // Index into SRV heap for normal texture.
-    // 法线贴图在SRV堆中的所应
+    // 法线贴图在SRV堆中的索引
     int NormalSrvHeapIndex = -1;
 
     // Dirty flag indicating the material has changed and we need to update the constant buffer.
@@ -263,7 +263,7 @@ struct Material
     // Material constant buffer data used for shading.
     // 用于着色的材质常量缓冲区数据
     DirectX::XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };   // 漫反射反射率
-    DirectX::XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };          // 材质熟悉
+    DirectX::XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };          // 材质属性
     float Roughness = .25f;                                         // 粗糙度
     DirectX::XMFLOAT4X4 MatTransform = MathHelper::Identity4x4();
 };

@@ -8,6 +8,10 @@ struct ObjectConstants
 {
     DirectX::XMFLOAT4X4 world = MathHelper::Identity4x4();
     DirectX::XMFLOAT4X4 texTransform = MathHelper::Identity4x4();
+    UINT materialIndex;
+    UINT objPad0;
+    UINT objPad1;
+    UINT objPad2;
 };
 
 struct PassConstants
@@ -61,6 +65,21 @@ struct TreeSpriteVertex
     DirectX::XMFLOAT2 size;
 };
 
+struct MaterialData
+{
+    DirectX::XMFLOAT4 diffuseAlbedo = {1.0f, 1.0f, 1.0f, 1.0f};
+    DirectX::XMFLOAT3 fresnelR0 = {0.01f, 0.01f, 0.01f};
+    float roughness = 64.0f;
+
+    // Used in texture mapping.
+    DirectX::XMFLOAT4X4 matTransform = MathHelper::Identity4x4();
+
+    UINT diffuseMapIndex = 0;
+    UINT materialPad0;
+    UINT materialPad1;
+    UINT materialPad2;
+};
+
 struct FrameResource
 {
 public:
@@ -78,8 +97,9 @@ public:
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> cmdListAlloc;
 
     std::unique_ptr<UploadBuffer<PassConstants>> passCB = nullptr;
-    std::unique_ptr<UploadBuffer<MaterialConstants>> materialCB = nullptr;
     std::unique_ptr<UploadBuffer<ObjectConstants>> objectCB = nullptr;
+    std::unique_ptr<UploadBuffer<MaterialData>> materialBuffer = nullptr;
+
     std::unique_ptr<UploadBuffer<Vertex>> wavesVB = nullptr;
 
     uint64_t fence = 0;

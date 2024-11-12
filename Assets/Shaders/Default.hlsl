@@ -15,48 +15,56 @@
 // 每帧都在变化的单个模型的常量数据
 struct ConstBufferObject
 {
-    float4x4 gWorld;
-    float4x4 gTexTransform;
+    float4x4 world;
+    float4x4 texTransform;
+    uint materialIndex;
+    uint objPad0;
+    uint objPad1;
+    uint objPad2;
 };
 
-// 每种材质都各有区别的常量数据
-struct ConstBufferMaterial
+// 材质数据
+struct MaterialData
 {
-    float4 gDiffuseAlbebo;
-    float3 gFresnelR0;
-    float gRoughness;
-    float4x4 gMatTransform;
+    float4 diffuseAlbedo;
+    float3 fresnelR0;
+    float roughness;
+    float4x4 matTransform;
+    uint diffuseMapIndex;
+    uint matPad0;
+    uint matPad1;
+    uint matPad2;
 };
 
 // 绘制过程中所用的杂项常量数据
 struct ConstBufferPass
 {
-    float4x4 gView;
-    float4x4 gInvView;
-    float4x4 gProj;
-    float4x4 gInvProj;
-    float4x4 gViewProj;
-    float4x4 gInvViewProj;
-    float3 gEyePosW;
-    float cbPerObjectPad1;
-    float2 gRenderTargetSize;
-    float2 gInvRenderTargetSize;
-    float gNearZ;
-    float gFarZ;
-    float gTotalTime;
-    float gDeltaTime;
+    float4x4 view;
+    float4x4 invView;
+    float4x4 proj;
+    float4x4 invProj;
+    float4x4 viewProj;
+    float4x4 invViewProj;
+    float3 eyePosW;
+    float perObjectPad1;
+    float2 renderTargetSize;
+    float2 invRenderTargetSize;
+    float nearZ;
+    float farZ;
+    float totalTime;
+    float deltaTime;
     
     // 环境光
-    float4 gAmbientLight;
+    float4 ambientLight;
     
     // Fog
-    float4 gFogColor;
-    float gFogStart;
-    float gFogRange;
-    float2 cbPerObjectPad2;
+    float4 fogColor;
+    float fogStart;
+    float fogRange;
+    float2 perObjectPad2;
     
     // Lights
-    Light gLights[MaxLights];
+    Light lights[MaxLights];
 };
 
 
@@ -75,8 +83,9 @@ struct VertexOut
     float2 texCoord : TEXCOORD;
 };
 
+Texture2D gDiffuseMap[7] : register(t0);
 
-Texture2D gDiffuseMap : register(t0);
+StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
 
 SamplerState gSamPointWrap          : register(s0);
 SamplerState gSamPointClamp         : register(s1);
@@ -95,36 +104,33 @@ cbuffer ConstBuffer : register(b1)
     ConstBufferPass cbPass;
 };
 
-cbuffer ConstBuffer : register(b2)
-{
-    ConstBufferMaterial cbMaterial;
-};
-
-
 VertexOut VS(VertexIn vin)
 {
     VertexOut vout;
     
+    MaterialData matData = gMaterialData[cbPerObject.materialIndex];
+    
     // 将顶点变换到世界空间
-    float4 worldPos = mul(float4(vin.pos, 1.0f), cbPerObject.gWorld);
+    float4 worldPos = mul(float4(vin.pos, 1.0f), cbPerObject.world);
     vout.posW = worldPos.xyx;
     
     // TODO 假设这里进行的是等比缩放，否则这里需要使用世界矩阵的逆转置矩阵
-    vout.normal = mul(vin.normal, (float3x3) cbPerObject.gWorld);
+    vout.normal = mul(vin.normal, (float3x3) cbPerObject.world);
     
     // 将顶点变换到齐次裁剪空间
-    vout.posH = mul(worldPos, cbPass.gViewProj);
+    vout.posH = mul(worldPos, cbPass.viewProj);
     
     // 为三角形插值而输出顶点属性
-    float4 texC = mul(float4(vin.texCoord, 0.0f, 1.0f), cbPerObject.gTexTransform);
-    vout.texCoord = mul(texC, cbMaterial.gMatTransform).xy;
+    float4 texC = mul(float4(vin.texCoord, 0.0f, 1.0f), cbPerObject.texTransform);
+    vout.texCoord = mul(texC, matData.matTransform).xy;
     return vout;
 }
 
 
 float4 PS(VertexOut pin) : SV_TARGET
 {
-    float4 diffuseAlbedo = gDiffuseMap.Sample(gSamAnisotropicWrap, pin.texCoord) * cbMaterial.gDiffuseAlbebo;
+    MaterialData matData = gMaterialData[cbPerObject.materialIndex];
+    float4 diffuseAlbedo = gDiffuseMap[matData.diffuseMapIndex].Sample(gSamAnisotropicWrap, pin.texCoord) * matData.diffuseAlbedo;
     
 #ifdef ALPHA_TEST
     // 若alpha < 0.1 则抛弃该像素。我们要在着色器中尽早执行此项测试，以尽快检测出满足条件的像素并退出着色器，从而跳出后续的相关处理
@@ -135,23 +141,23 @@ float4 PS(VertexOut pin) : SV_TARGET
     pin.normal = normalize(pin.normal);
     
     // 光线经表面上一点反射到观察点的向量
-    float3 toEye = cbPass.gEyePosW - pin.posW;
+    float3 toEye = cbPass.eyePosW - pin.posW;
     float distToEye = length(toEye);
     toEye /= distToEye;
     
     // 间接关照
-    float4 ambient = cbPass.gAmbientLight * diffuseAlbedo;
+    float4 ambient = cbPass.ambientLight * diffuseAlbedo;
     
-    const float shininess = 1.0f - cbMaterial.gRoughness;
-    Material mat = { diffuseAlbedo, cbMaterial.gFresnelR0, shininess };
+    const float shininess = 1.0f - matData.roughness;
+    Material mat = { diffuseAlbedo, matData.fresnelR0, shininess };
     float3 shadowFactor = 1.0f;
-    float4 lightingResult = ComputeLighting(cbPass.gLights, mat, pin.posW, pin.normal, toEye, shadowFactor);
+    float4 lightingResult = ComputeLighting(cbPass.lights, mat, pin.posW, pin.normal, toEye, shadowFactor);
     
     float4 litColor = ambient + lightingResult;
     
 #ifdef FOG
-    float fogAmount = saturate((distToEye-cbPass.gFogStart)/cbPass.gFogRange);
-    litColor = lerp(litColor, cbPass.gFogColor, fogAmount);
+    float fogAmount = saturate((distToEye-cbPass.fogStart)/cbPass.fogRange);
+    litColor = lerp(litColor, cbPass.fogColor, fogAmount);
 #endif
     
     // 从漫反射材质中获取alpha值的常见手段
