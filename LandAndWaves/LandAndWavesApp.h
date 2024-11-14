@@ -28,7 +28,11 @@ struct RenderItem
 
     D3D12_PRIMITIVE_TOPOLOGY primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 
+    BoundingBox boundingBox;
+    std::vector<InstanceData> instances;
+
     UINT indexCount = 0;
+    UINT instanceCount = 0;
     UINT startIndexLocation = 0;
     int baseVertexLocation = 0;
 };
@@ -68,7 +72,7 @@ private:
 
     void AnimateMaterials(const GameTimer &gt);
     //void UpdateCamera(const GameTimer &gt);
-    void UpdateObjectCBs(const GameTimer &gt);
+    void UpdateInstanceBuffer(const GameTimer &gt);
     void UpdateMainPassCB(const GameTimer &gt);
     void UpdateMaterialBuffer(const GameTimer &gt);
     void UpdateReflectedPassCB(const GameTimer &gt);
@@ -78,14 +82,16 @@ private:
     void BuildLandGeometry();
     void BuildWaveGeometryBuffers();
     void BuildBoxGeometry();
+
     void BuildRoomGeometry();
     void BuildSkullGeometry();
     void BuildTreeSpritesGeometry();
 
-    void BuildMaterial();
     void LoadTextures();
+    void BuildMaterial();
 
     void BuildRenderItems();
+    void BuildInstanceDataForSkullRenderItem(RenderItem* renderItem);
 
     void BuildFrameResources();
     void BuildDescriptorHeaps();
@@ -135,9 +141,19 @@ private:
     PassConstants mMainPassCB;
     PassConstants mReflectedPassCB;
 
+    BoundingFrustum mCamFrustum;
+
+    UINT mAllInstanceDataCount = 0;
+
     bool mIsWireframe = false;
 
     Camera mCamera;
 
     POINT mLastMousePos;
+
+    bool mFrustumCullingEnabled = true;
+
+    // 
+    std::unordered_map<std::string, uint32_t> mTextureNameToSRVHeapIndex;
+    std::vector<Texture*> mSRVHeapTexture;
 };

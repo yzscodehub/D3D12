@@ -13,7 +13,7 @@
 #include "LightingUtil.hlsl"
 
 // 每帧都在变化的单个模型的常量数据
-struct ConstBufferObject
+struct InstanceData
 {
     float4x4 world;
     float4x4 texTransform;
@@ -67,6 +67,23 @@ struct ConstBufferPass
     Light lights[MaxLights];
 };
 
+SamplerState gSamPointWrap : register(s0);
+SamplerState gSamPointClamp : register(s1);
+SamplerState gSamLinearWrap : register(s2);
+SamplerState gSamLinearClamp : register(s3);
+SamplerState gSamAnisotropicWrap : register(s4);
+SamplerState gSamAnisotropicClamp : register(s5);
+
+Texture2D gDiffuseMap[7] : register(t0);
+
+cbuffer ConstBuffer : register(b0)
+{
+    ConstBufferPass cbPass;
+};
+
+StructuredBuffer<InstanceData> gInstanceData : register(t0, space1);
+StructuredBuffer<MaterialData> gMaterialData : register(t1, space1);
+
 
 struct VertexIn
 {
@@ -81,55 +98,45 @@ struct VertexOut
     float3 posW : POSITION;
     float3 normal : NORMAL;
     float2 texCoord : TEXCOORD;
+    // 带有 nointerpolation 的变量不会根据片元的位置进行插值，而是在整个图元内保持一致
+    nointerpolation uint materialIndex : MATERIALINDEX;
 };
 
-Texture2D gDiffuseMap[7] : register(t0);
 
-StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
-
-SamplerState gSamPointWrap          : register(s0);
-SamplerState gSamPointClamp         : register(s1);
-SamplerState gSamLinearWrap         : register(s2);
-SamplerState gSamLinearClamp        : register(s3);
-SamplerState gSamAnisotropicWrap    : register(s4);
-SamplerState gSamAnisotropicClamp   : register(s5);
-
-cbuffer ConstBuffer : register(b0)
-{
-    ConstBufferObject cbPerObject;
-};
-
-cbuffer ConstBuffer : register(b1)
-{
-    ConstBufferPass cbPass;
-};
-
-VertexOut VS(VertexIn vin)
+VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
 {
     VertexOut vout;
     
-    MaterialData matData = gMaterialData[cbPerObject.materialIndex];
+    InstanceData instData = gInstanceData[instanceID];
+    float4x4 world = instData.world;
+    float4x4 texTransform = instData.texTransform;
+    uint materialIndex = instData.materialIndex;
+    
+    MaterialData matData = gMaterialData[materialIndex];
     
     // 将顶点变换到世界空间
-    float4 worldPos = mul(float4(vin.pos, 1.0f), cbPerObject.world);
+    float4 worldPos = mul(float4(vin.pos, 1.0f), world);
     vout.posW = worldPos.xyx;
     
     // TODO 假设这里进行的是等比缩放，否则这里需要使用世界矩阵的逆转置矩阵
-    vout.normal = mul(vin.normal, (float3x3) cbPerObject.world);
+    vout.normal = mul(vin.normal, (float3x3) world);
     
     // 将顶点变换到齐次裁剪空间
     vout.posH = mul(worldPos, cbPass.viewProj);
     
     // 为三角形插值而输出顶点属性
-    float4 texC = mul(float4(vin.texCoord, 0.0f, 1.0f), cbPerObject.texTransform);
+    float4 texC = mul(float4(vin.texCoord, 0.0f, 1.0f), texTransform);
     vout.texCoord = mul(texC, matData.matTransform).xy;
+    
+    vout.materialIndex = materialIndex;
+    
     return vout;
 }
 
 
 float4 PS(VertexOut pin) : SV_TARGET
 {
-    MaterialData matData = gMaterialData[cbPerObject.materialIndex];
+    MaterialData matData = gMaterialData[pin.materialIndex];
     float4 diffuseAlbedo = gDiffuseMap[matData.diffuseMapIndex].Sample(gSamAnisotropicWrap, pin.texCoord) * matData.diffuseAlbedo;
     
 #ifdef ALPHA_TEST

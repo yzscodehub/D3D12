@@ -4,7 +4,7 @@
 #include "../Common/UploadBuffer.h"
 #include "FrameResource.h"
 
-struct ObjectConstants
+struct InstanceData
 {
     DirectX::XMFLOAT4X4 world = MathHelper::Identity4x4();
     DirectX::XMFLOAT4X4 texTransform = MathHelper::Identity4x4();
@@ -97,8 +97,8 @@ public:
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> cmdListAlloc;
 
     std::unique_ptr<UploadBuffer<PassConstants>> passCB = nullptr;
-    std::unique_ptr<UploadBuffer<ObjectConstants>> objectCB = nullptr;
     std::unique_ptr<UploadBuffer<MaterialData>> materialBuffer = nullptr;
+    std::unique_ptr<UploadBuffer<InstanceData>> instanceBuffer = nullptr;
 
     std::unique_ptr<UploadBuffer<Vertex>> wavesVB = nullptr;
 

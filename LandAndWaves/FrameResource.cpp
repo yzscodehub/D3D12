@@ -11,10 +11,12 @@ FrameResource::FrameResource(
         D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(cmdListAlloc.GetAddressOf())));
 
     passCB = std::make_unique<UploadBuffer<PassConstants>>(device, passCount, true);
-    objectCB = std::make_unique<UploadBuffer<ObjectConstants>>(device, objectCount, true);
 
     materialBuffer = std::make_unique<UploadBuffer<MaterialData>>(device, materialCount, false);
+    instanceBuffer = std::make_unique<UploadBuffer<InstanceData>>(device, objectCount, false);
+
     wavesVB = std::make_unique<UploadBuffer<Vertex>>(device, waveVertexCount, false);
+
 }
 
 FrameResource::~FrameResource() {}
