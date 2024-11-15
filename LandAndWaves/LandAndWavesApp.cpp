@@ -23,6 +23,7 @@ bool LandAndWavesApp::Initialize()
 
     LoadTextures();
     BuildMaterial();
+    BuildShapeGeometry();
     BuildLandGeometry();
     BuildWaveGeometryBuffers();
     BuildBoxGeometry();
@@ -118,8 +119,10 @@ void LandAndWavesApp::Draw(const GameTimer &gt)
     mCommandList->SetGraphicsRootShaderResourceView(
         1, mCurrFrameResource->materialBuffer->Resource()->GetGPUVirtualAddress());
     mCommandList->SetGraphicsRootConstantBufferView(2, curPasssResource->GetGPUVirtualAddress());
-    mCommandList
-        ->SetGraphicsRootDescriptorTable(3, mSRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    
+    CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle(mSRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    mCommandList->SetGraphicsRootDescriptorTable(3, srvHandle);
+    mCommandList->SetGraphicsRootDescriptorTable(4, srvHandle.Offset(1, mCbvSrvUavDescriptorSize));
 
     // 先绘制不透明物体
     DrawRenderItems(mCommandList.Get(), mRenderItemLayer[int(RenderLayer::Opaque)]);
@@ -153,6 +156,9 @@ void LandAndWavesApp::Draw(const GameTimer &gt)
 
     mCommandList->SetPipelineState(mPSOs["shadow"].Get());
     DrawRenderItems(mCommandList.Get(), mRenderItemLayer[int(RenderLayer::Shadow)]);
+
+    mCommandList->SetPipelineState(mPSOs["sky"].Get());
+    DrawRenderItems(mCommandList.Get(), mRenderItemLayer[(int) RenderLayer::Sky]);
 
     // 按照资源的用途指示其状态的转变, 此处将资源从渲染目标状态转换为呈现状态
     auto resourceBarrierRenderTargetToPresent = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -339,7 +345,7 @@ void LandAndWavesApp::UpdateInstanceBuffer(const GameTimer &gt)
             InstanceData objConstans;
             auto world = XMLoadFloat4x4(&instance.world);
             auto texTransform = XMLoadFloat4x4(&instance.texTransform);
-            
+
             auto invWorld = XMMatrixInverse(&XMMatrixDeterminant(world), world);
 
             // 由观察空间到物体局部的变换矩阵
@@ -348,8 +354,8 @@ void LandAndWavesApp::UpdateInstanceBuffer(const GameTimer &gt)
             // 将摄像机视锥体由观察空间变换到物体的局部空间
             BoundingFrustum localSpaceFrustum;
             mCamFrustum.Transform(localSpaceFrustum, viewToLocal);
-            if (!mFrustumCullingEnabled || localSpaceFrustum.Contains(item->boundingBox)
-                != DirectX::DISJOINT) {
+            if (!mFrustumCullingEnabled
+                || localSpaceFrustum.Contains(item->boundingBox) != DirectX::DISJOINT) {
                 XMStoreFloat4x4(&objConstans.world, XMMatrixTranspose(world));
                 XMStoreFloat4x4(&objConstans.texTransform, XMMatrixTranspose(texTransform));
                 objConstans.materialIndex = instance.materialIndex;
@@ -606,7 +612,6 @@ void LandAndWavesApp::BuildBoxGeometry()
     BoundingBox bounds;
     XMStoreFloat3(&bounds.Center, 0.5f * (vMin + vMax));
     XMStoreFloat3(&bounds.Extents, 0.5f * (vMax - vMin));
-
 
     const UINT vbByteSize = (UINT) vertices.size() * sizeof(Vertex);
 
@@ -945,6 +950,145 @@ void LandAndWavesApp::BuildTreeSpritesGeometry()
     mGeometries[geo->Name] = std::move(geo);
 }
 
+void LandAndWavesApp::BuildShapeGeometry()
+{
+    auto ComputeBoundingBox = [](const GeometryGenerator::MeshData &meshData) -> BoundingBox {
+        XMFLOAT3 vMinf3(+MathHelper::Infinity, +MathHelper::Infinity, +MathHelper::Infinity);
+        XMFLOAT3 vMaxf3(-MathHelper::Infinity, -MathHelper::Infinity, -MathHelper::Infinity);
+        XMVECTOR vMin = XMLoadFloat3(&vMinf3);
+        XMVECTOR vMax = XMLoadFloat3(&vMaxf3);
+        for (uint32_t i = 0; i < meshData.Vertices.size(); ++i) {
+            auto pos = meshData.Vertices[i].Position;
+            auto P = XMLoadFloat3(&pos);
+            vMin = XMVectorMin(vMin, P);
+            vMax = XMVectorMax(vMax, P);
+        }
+        BoundingBox bounds;
+        XMStoreFloat3(&bounds.Center, 0.5f * (vMin + vMax));
+        XMStoreFloat3(&bounds.Extents, 0.5f * (vMax - vMin));
+        return bounds;
+    };
+
+    GeometryGenerator geoGen;
+    GeometryGenerator::MeshData box = geoGen.CreateBox(1.0f, 1.0f, 1.0f, 3);
+    GeometryGenerator::MeshData grid = geoGen.CreateGrid(20.0f, 30.0f, 60, 40);
+    GeometryGenerator::MeshData sphere = geoGen.CreateSphere(0.5f, 20, 20);
+    GeometryGenerator::MeshData cylinder = geoGen.CreateCylinder(0.5f, 0.3f, 3.0f, 20, 20);
+
+    //
+    // We are concatenating all the geometry into one big vertex/index buffer.  So
+    // define the regions in the buffer each submesh covers.
+    //
+
+    // Cache the vertex offsets to each object in the concatenated vertex buffer.
+    UINT boxVertexOffset = 0;
+    UINT gridVertexOffset = (UINT) box.Vertices.size();
+    UINT sphereVertexOffset = gridVertexOffset + (UINT) grid.Vertices.size();
+    UINT cylinderVertexOffset = sphereVertexOffset + (UINT) sphere.Vertices.size();
+
+    // Cache the starting index for each object in the concatenated index buffer.
+    UINT boxIndexOffset = 0;
+    UINT gridIndexOffset = (UINT) box.Indices32.size();
+    UINT sphereIndexOffset = gridIndexOffset + (UINT) grid.Indices32.size();
+    UINT cylinderIndexOffset = sphereIndexOffset + (UINT) sphere.Indices32.size();
+
+    SubmeshGeometry boxSubmesh;
+    boxSubmesh.IndexCount = (UINT) box.Indices32.size();
+    boxSubmesh.StartIndexLocation = boxIndexOffset;
+    boxSubmesh.BaseVertexLocation = boxVertexOffset;
+    boxSubmesh.Bounds = ComputeBoundingBox(box);
+
+    SubmeshGeometry gridSubmesh;
+    gridSubmesh.IndexCount = (UINT) grid.Indices32.size();
+    gridSubmesh.StartIndexLocation = gridIndexOffset;
+    gridSubmesh.BaseVertexLocation = gridVertexOffset;
+    gridSubmesh.Bounds = ComputeBoundingBox(grid);
+
+    SubmeshGeometry sphereSubmesh;
+    sphereSubmesh.IndexCount = (UINT) sphere.Indices32.size();
+    sphereSubmesh.StartIndexLocation = sphereIndexOffset;
+    sphereSubmesh.BaseVertexLocation = sphereVertexOffset;
+    sphereSubmesh.Bounds = ComputeBoundingBox(sphere);
+
+    SubmeshGeometry cylinderSubmesh;
+    cylinderSubmesh.IndexCount = (UINT) cylinder.Indices32.size();
+    cylinderSubmesh.StartIndexLocation = cylinderIndexOffset;
+    cylinderSubmesh.BaseVertexLocation = cylinderVertexOffset;
+    cylinderSubmesh.Bounds = ComputeBoundingBox(cylinder);
+
+    //
+    // Extract the vertex elements we are interested in and pack the
+    // vertices of all the meshes into one vertex buffer.
+    //
+
+    auto totalVertexCount = box.Vertices.size() + grid.Vertices.size() + sphere.Vertices.size()
+                            + cylinder.Vertices.size();
+
+    std::vector<Vertex> vertices(totalVertexCount);
+
+    UINT k = 0;
+    for (size_t i = 0; i < box.Vertices.size(); ++i, ++k) {
+        vertices[k].pos = box.Vertices[i].Position;
+        vertices[k].normal = box.Vertices[i].Normal;
+        vertices[k].texCoord = box.Vertices[i].TexC;
+    }
+
+    for (size_t i = 0; i < grid.Vertices.size(); ++i, ++k) {
+        vertices[k].pos = grid.Vertices[i].Position;
+        vertices[k].normal = grid.Vertices[i].Normal;
+        vertices[k].texCoord = grid.Vertices[i].TexC;
+    }
+
+    for (size_t i = 0; i < sphere.Vertices.size(); ++i, ++k) {
+        vertices[k].pos = sphere.Vertices[i].Position;
+        vertices[k].normal = sphere.Vertices[i].Normal;
+        vertices[k].texCoord = sphere.Vertices[i].TexC;
+    }
+
+    for (size_t i = 0; i < cylinder.Vertices.size(); ++i, ++k) {
+        vertices[k].pos = cylinder.Vertices[i].Position;
+        vertices[k].normal = cylinder.Vertices[i].Normal;
+        vertices[k].texCoord = cylinder.Vertices[i].TexC;
+    }
+
+    std::vector<std::uint16_t> indices;
+    indices.insert(indices.end(), std::begin(box.GetIndices16()), std::end(box.GetIndices16()));
+    indices.insert(indices.end(), std::begin(grid.GetIndices16()), std::end(grid.GetIndices16()));
+    indices.insert(indices.end(), std::begin(sphere.GetIndices16()), std::end(sphere.GetIndices16()));
+    indices.insert(
+        indices.end(), std::begin(cylinder.GetIndices16()), std::end(cylinder.GetIndices16()));
+
+    const UINT vbByteSize = (UINT) vertices.size() * sizeof(Vertex);
+    const UINT ibByteSize = (UINT) indices.size() * sizeof(std::uint16_t);
+
+    auto geo = std::make_unique<MeshGeometry>();
+    geo->Name = "shapeGeo";
+
+    ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
+    CopyMemory(geo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
+
+    ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
+    CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
+
+    geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(
+        md3dDevice.Get(), mCommandList.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
+
+    geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(
+        md3dDevice.Get(), mCommandList.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
+
+    geo->VertexByteStride = sizeof(Vertex);
+    geo->VertexBufferByteSize = vbByteSize;
+    geo->IndexFormat = DXGI_FORMAT_R16_UINT;
+    geo->IndexBufferByteSize = ibByteSize;
+
+    geo->DrawArgs["box"] = boxSubmesh;
+    geo->DrawArgs["grid"] = gridSubmesh;
+    geo->DrawArgs["sphere"] = sphereSubmesh;
+    geo->DrawArgs["cylinder"] = cylinderSubmesh;
+
+    mGeometries[geo->Name] = std::move(geo);
+}
+
 void LandAndWavesApp::BuildDescriptorHeaps()
 {
     // 创建描述符堆
@@ -960,10 +1104,15 @@ void LandAndWavesApp::BuildDescriptorHeaps()
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Texture2D.MostDetailedMip = 0;
 
     for (const auto it : mSRVHeapTexture) {
+        if (it->Name == "grasscube1024Tex") {
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;     
+        } else {
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; 
+        }
+
         auto resource = it->Resource.Get();
         srvDesc.Format = resource->GetDesc().Format;
         srvDesc.Texture2D.MipLevels = resource->GetDesc().MipLevels;
@@ -984,19 +1133,21 @@ void LandAndWavesApp::BuildDescriptorHeaps()
 
 void LandAndWavesApp::BuildRootSignature()
 {
-    CD3DX12_DESCRIPTOR_RANGE texTable;
-    texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, mTextures.size(), 0);
+    CD3DX12_DESCRIPTOR_RANGE texTables[2];
+    texTables[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+    texTables[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, mTextures.size() - 1, 1);
 
-    CD3DX12_ROOT_PARAMETER slotRootParameter[4];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[5];
     // 按变更频率由高到低排列
-    slotRootParameter[0].InitAsShaderResourceView(0, 1); // objectBuffer
-    slotRootParameter[1].InitAsShaderResourceView(1, 1); // materialBuffer
-    slotRootParameter[2].InitAsConstantBufferView(0);               // passCBV
+    slotRootParameter[0].InitAsShaderResourceView(0, 1); // objectsBufferSRV
+    slotRootParameter[1].InitAsShaderResourceView(1, 1); // materialsBufferSRV
+    slotRootParameter[2].InitAsConstantBufferView(0);    // passCBV
     slotRootParameter[3]
-        .InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL); // srvTabel
+        .InitAsDescriptorTable(1, &texTables[0], D3D12_SHADER_VISIBILITY_PIXEL); // textureSRV
+    slotRootParameter[4]
+        .InitAsDescriptorTable(1, &texTables[1], D3D12_SHADER_VISIBILITY_PIXEL); // textureSRV
 
     auto staticSamplers = GetStaticSamplers();
-
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
         _countof(slotRootParameter),
         slotRootParameter,
@@ -1053,6 +1204,11 @@ void LandAndWavesApp::BuildShadersAndInputLayout()
         GetAppPath() + L"/Assets/Shaders/TreeSprite.hlsl", nullptr, "GS", "gs_5_1");
     mShaders["treeSpritePS"] = d3dUtil::CompileShader(
         GetAppPath() + L"/Assets/Shaders/TreeSprite.hlsl", alphaTestDefines, "PS", "ps_5_1");
+
+    mShaders["skyVS"]
+        = d3dUtil::CompileShader(GetAppPath() + L"/Assets/Shaders/Sky.hlsl", nullptr, "VS", "vs_5_1");
+    mShaders["skyPS"]
+        = d3dUtil::CompileShader(GetAppPath() + L"/Assets/Shaders/Sky.hlsl", nullptr, "PS", "ps_5_1");
 
     mInputLayout
         = {{"POSITION",
@@ -1249,8 +1405,21 @@ void LandAndWavesApp::BuildPSOs()
     ThrowIfFailed(
         md3dDevice->CreateGraphicsPipelineState(&shadowPSODesc, IID_PPV_ARGS(&mPSOs["shadow"])));
 
+    // sky PSO
+    auto skyPSODesc = opaquePSODesc;
+    skyPSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE; // 摄像机位于天空球内，所以要关闭剔除功能
+    skyPSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    skyPSODesc.VS
+        = {reinterpret_cast<BYTE *>(mShaders["skyVS"]->GetBufferPointer()),
+           mShaders["skyVS"]->GetBufferSize()};
+    skyPSODesc.PS
+        = {reinterpret_cast<BYTE *>(mShaders["skyPS"]->GetBufferPointer()),
+           mShaders["skyPS"]->GetBufferSize()};
+    ThrowIfFailed(
+        md3dDevice->CreateGraphicsPipelineState(&skyPSODesc, IID_PPV_ARGS(&mPSOs["sky"])));
+
     // tree sprites PSO
-    auto treeSpritePSODesc = opaquePSODesc;
+    /*auto treeSpritePSODesc = opaquePSODesc;
     treeSpritePSODesc.VS = {
         reinterpret_cast<BYTE *>(mShaders["treeSpriteVS"]->GetBufferPointer()),
         mShaders["treeSpriteVS"]->GetBufferSize(),
@@ -1269,7 +1438,7 @@ void LandAndWavesApp::BuildPSOs()
     treeSpritePSODesc.InputLayout
         = {mTreeSpriteInputLayout.data(), (UINT) mTreeSpriteInputLayout.size()};
     treeSpritePSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    /*ThrowIfFailed(
+    ThrowIfFailed(
         md3dDevice->CreateGraphicsPipelineState(&treeSpritePSODesc, IID_PPV_ARGS(&mPSOs["treeSprites"])));*/
 }
 
@@ -1288,6 +1457,23 @@ void LandAndWavesApp::BuildFrameResources()
 
 void LandAndWavesApp::BuildRenderItems()
 {
+    auto skyRenderItem = std::make_unique<RenderItem>();
+    //XMStoreFloat4x4(&skyRenderItem->world, XMMatrixScaling(5000.0f, 5000.0f, 5000.0f));
+    skyRenderItem->texTransform = MathHelper::Identity4x4();
+    skyRenderItem->objCBIndex = mAllInstanceDataCount++;
+    skyRenderItem->mat = mMaterials["skyMat"].get();
+    skyRenderItem->geo = mGeometries["shapeGeo"].get();
+    skyRenderItem->primitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    skyRenderItem->indexCount = skyRenderItem->geo->DrawArgs["sphere"].IndexCount;
+    skyRenderItem->startIndexLocation = skyRenderItem->geo->DrawArgs["sphere"].StartIndexLocation;
+    skyRenderItem->baseVertexLocation = skyRenderItem->geo->DrawArgs["sphere"].BaseVertexLocation;
+    skyRenderItem->boundingBox = skyRenderItem->geo->DrawArgs["sphere"].Bounds;
+    skyRenderItem->instances.resize(1);
+    skyRenderItem->instances[0].materialIndex = skyRenderItem->mat->MatCBIndex;
+    XMStoreFloat4x4(&skyRenderItem->instances[0].world, XMMatrixScaling(5000.0f, 5000.0f, 5000.0f));
+    mRenderItemLayer[(int) RenderLayer::Sky].push_back(skyRenderItem.get());
+    mAllRenderItems.push_back(std::move(skyRenderItem));
+
     auto wavesRenderItem = std::make_unique<RenderItem>();
     //XMStoreFloat4x4(&wavesRenderItem->world, XMMatrixTranslation(0.0f, -5.0f, 0.0f));
     //XMStoreFloat4x4(&wavesRenderItem->texTransform, XMMatrixScaling(5.0f, 5.0f, 1.0f));
@@ -1305,6 +1491,7 @@ void LandAndWavesApp::BuildRenderItems()
     XMStoreFloat4x4(&wavesRenderItem->instances[0].texTransform, XMMatrixScaling(5.0f, 5.0f, 1.0f));
     mRenderItemLayer[(int) RenderLayer::Transparent].emplace_back(wavesRenderItem.get());
     mWavesRenderItem = wavesRenderItem.get();
+    mAllRenderItems.emplace_back(std::move(wavesRenderItem));
 
     auto gridRenderItem = std::make_unique<RenderItem>();
     //XMStoreFloat4x4(&gridRenderItem->world, XMMatrixTranslation(0.0f, -5.0f, 0.0f));
@@ -1322,6 +1509,7 @@ void LandAndWavesApp::BuildRenderItems()
     XMStoreFloat4x4(&gridRenderItem->instances[0].world, XMMatrixTranslation(0.0f, -5.0f, 0.0f));
     XMStoreFloat4x4(&gridRenderItem->instances[0].texTransform, XMMatrixScaling(5.0f, 5.0f, 1.0f));
     mRenderItemLayer[(int) RenderLayer::Opaque].emplace_back(gridRenderItem.get());
+    mAllRenderItems.emplace_back(std::move(gridRenderItem));
 
     auto boxRenderItem = std::make_unique<RenderItem>();
     XMStoreFloat4x4(&boxRenderItem->world, XMMatrixTranslation(6.0f, -5.0f, -15.0f));
@@ -1337,6 +1525,7 @@ void LandAndWavesApp::BuildRenderItems()
     boxRenderItem->instances[0].materialIndex = boxRenderItem->mat->MatCBIndex;
     XMStoreFloat4x4(&boxRenderItem->instances[0].world, XMMatrixTranslation(6.0f, -5.0f, -15.0f));
     mRenderItemLayer[(int) RenderLayer::AlphaTested].emplace_back(boxRenderItem.get());
+    mAllRenderItems.emplace_back(std::move(boxRenderItem));
 
     auto floorRenderItem = std::make_unique<RenderItem>();
     //XMStoreFloat4x4(&floorRenderItem->world, XMMatrixTranslation(0.0f, 0.0f, 0.0f));
@@ -1351,12 +1540,13 @@ void LandAndWavesApp::BuildRenderItems()
     floorRenderItem->instances.resize(1);
     floorRenderItem->instances[0].materialIndex = floorRenderItem->mat->MatCBIndex;
     mRenderItemLayer[(int) RenderLayer::Opaque].emplace_back(floorRenderItem.get());
+    mAllRenderItems.emplace_back(std::move(floorRenderItem));
 
     auto wallsRenderItem = std::make_unique<RenderItem>();
     //XMStoreFloat4x4(&wallsRenderItem->world, XMMatrixTranslation(0.0f, 0.0f, 0.0f));
     wallsRenderItem->objCBIndex = mAllInstanceDataCount++;
     wallsRenderItem->geo = mGeometries["roomGeo"].get();
-    wallsRenderItem->mat = mMaterials["bricksMat"].get();
+    wallsRenderItem->mat = mMaterials["bricks3Mat"].get();
     wallsRenderItem->primitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     wallsRenderItem->indexCount = wallsRenderItem->geo->DrawArgs["wall"].IndexCount;
     wallsRenderItem->startIndexLocation = wallsRenderItem->geo->DrawArgs["wall"].StartIndexLocation;
@@ -1365,6 +1555,7 @@ void LandAndWavesApp::BuildRenderItems()
     wallsRenderItem->instances.resize(1);
     wallsRenderItem->instances[0].materialIndex = wallsRenderItem->mat->MatCBIndex;
     mRenderItemLayer[(int) RenderLayer::Opaque].emplace_back(wallsRenderItem.get());
+    mAllRenderItems.emplace_back(std::move(wallsRenderItem));
 
     auto skullRenderItem = std::make_unique<RenderItem>();
     //XMStoreFloat4x4(&skullRenderItem->world, XMMatrixTranslation(0.0f, 0.0f, -5.0f));
@@ -1382,7 +1573,7 @@ void LandAndWavesApp::BuildRenderItems()
     mRenderItemLayer[(int) RenderLayer::Opaque].emplace_back(skullRenderItem.get());
     mSkullRenderItem = skullRenderItem.get();
     BuildInstanceDataForSkullRenderItem(skullRenderItem.get());
-
+    
     auto reflectedSkullRenderItem = std::make_unique<RenderItem>();
     *reflectedSkullRenderItem = *skullRenderItem;
     reflectedSkullRenderItem->objCBIndex = mAllInstanceDataCount++;
@@ -1400,6 +1591,10 @@ void LandAndWavesApp::BuildRenderItems()
     mRenderItemLayer[(int) RenderLayer::Shadow].emplace_back(shadowSkullRenderItem.get());
     mShadowedSkullRenderItem = shadowSkullRenderItem.get();
 
+    mAllRenderItems.emplace_back(std::move(reflectedSkullRenderItem));
+    mAllRenderItems.emplace_back(std::move(skullRenderItem));
+    mAllRenderItems.emplace_back(std::move(shadowSkullRenderItem));
+
     auto mirrorRenderItem = std::make_unique<RenderItem>();
     //XMStoreFloat4x4(&mirrorRenderItem->world, XMMatrixTranslation(0.0f, 0.0f, 0.0f));
     mirrorRenderItem->objCBIndex = mAllInstanceDataCount++;
@@ -1415,7 +1610,8 @@ void LandAndWavesApp::BuildRenderItems()
     mirrorRenderItem->instances[0].materialIndex = mirrorRenderItem->mat->MatCBIndex;
     mRenderItemLayer[(int) RenderLayer::Mirrors].emplace_back(mirrorRenderItem.get());
     mRenderItemLayer[(int) RenderLayer::Transparent].emplace_back(mirrorRenderItem.get());
-    
+    mAllRenderItems.emplace_back(std::move(mirrorRenderItem));
+
     /*auto treeSpritesRenderItem = std::make_unique<RenderItem>();
     treeSpritesRenderItem->world = MathHelper::Identity4x4();
     treeSpritesRenderItem->objCBIndex = 9;
@@ -1428,18 +1624,115 @@ void LandAndWavesApp::BuildRenderItems()
     treeSpritesRenderItem->startIndexLocation
         = treeSpritesRenderItem->geo->DrawArgs["points"].StartIndexLocation;
     mRenderItemLayer[(int) RenderLayer::AlphaTestedTreeSprites].emplace_back(
-        treeSpritesRenderItem.get());*/
+        treeSpritesRenderItem.get());
+    mAllRenderItems.emplace_back(std::move(treeSpritesRenderItem));*/
 
-    mAllRenderItems.emplace_back(std::move(wavesRenderItem));
-    mAllRenderItems.emplace_back(std::move(gridRenderItem));
-    mAllRenderItems.emplace_back(std::move(boxRenderItem));
-    mAllRenderItems.emplace_back(std::move(wallsRenderItem));
-    mAllRenderItems.emplace_back(std::move(floorRenderItem));
-    mAllRenderItems.emplace_back(std::move(skullRenderItem));
-    mAllRenderItems.emplace_back(std::move(reflectedSkullRenderItem));
-    mAllRenderItems.emplace_back(std::move(shadowSkullRenderItem));
-    mAllRenderItems.emplace_back(std::move(mirrorRenderItem));
-    //mAllRenderItems.emplace_back(std::move(treeSpritesRenderItem));
+    {
+        auto boxRitem = std::make_unique<RenderItem>();
+        boxRitem->objCBIndex = mAllInstanceDataCount++;
+        boxRitem->mat = mMaterials["bricks2Mat"].get();
+        boxRitem->geo = mGeometries["shapeGeo"].get();
+        boxRitem->primitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+        boxRitem->indexCount = boxRitem->geo->DrawArgs["box"].IndexCount;
+        boxRitem->startIndexLocation = boxRitem->geo->DrawArgs["box"].StartIndexLocation;
+        boxRitem->baseVertexLocation = boxRitem->geo->DrawArgs["box"].BaseVertexLocation;
+        boxRitem->boundingBox = boxRitem->geo->DrawArgs["box"].Bounds;
+        boxRitem->instances.resize(1);
+        boxRitem->instances[0].materialIndex = boxRitem->mat->MatCBIndex;
+        XMStoreFloat4x4(
+            &boxRitem->instances[0].world,
+            XMMatrixScaling(2.0f, 1.0f, 2.0f) * XMMatrixTranslation(0.0f, 15.5f, 0.0f));
+        XMStoreFloat4x4(&boxRitem->instances[0].texTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
+        mRenderItemLayer[(int) RenderLayer::Opaque].emplace_back(boxRitem.get());
+        mAllRenderItems.emplace_back(std::move(boxRitem));
+
+        auto skullRitem = std::make_unique<RenderItem>();
+        skullRitem->objCBIndex = mAllInstanceDataCount++;
+        skullRitem->mat = mMaterials["skullMat"].get();
+        skullRitem->geo = mGeometries["skullGeo"].get();
+        skullRitem->primitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+        skullRitem->indexCount = skullRitem->geo->DrawArgs["skull"].IndexCount;
+        skullRitem->startIndexLocation = skullRitem->geo->DrawArgs["skull"].StartIndexLocation;
+        skullRitem->baseVertexLocation = skullRitem->geo->DrawArgs["skull"].BaseVertexLocation;
+        skullRitem->boundingBox = skullRitem->geo->DrawArgs["skull"].Bounds;
+        skullRitem->instances.resize(1);
+        skullRitem->instances[0].materialIndex = skullRitem->mat->MatCBIndex;
+        XMStoreFloat4x4(
+            &skullRitem->instances[0].world,
+            XMMatrixScaling(0.4f, 0.4f, 0.4f) * XMMatrixTranslation(0.0f, 16.0f, 0.0f));
+        mRenderItemLayer[(int) RenderLayer::Opaque].emplace_back(skullRitem.get());
+        mAllRenderItems.emplace_back(std::move(skullRitem));
+
+        auto gridRitem = std::make_unique<RenderItem>();
+        gridRitem->objCBIndex = mAllInstanceDataCount++;
+        gridRitem->mat = mMaterials["tileMat"].get();
+        gridRitem->geo = mGeometries["shapeGeo"].get();
+        gridRitem->primitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+        gridRitem->indexCount = gridRitem->geo->DrawArgs["grid"].IndexCount;
+        gridRitem->startIndexLocation = gridRitem->geo->DrawArgs["grid"].StartIndexLocation;
+        gridRitem->baseVertexLocation = gridRitem->geo->DrawArgs["grid"].BaseVertexLocation;
+        gridRitem->boundingBox = gridRitem->geo->DrawArgs["grid"].Bounds;
+        gridRitem->instances.resize(1);
+        gridRitem->instances[0].materialIndex = gridRitem->mat->MatCBIndex;
+        XMStoreFloat4x4(&gridRitem->instances[0].world, XMMatrixTranslation(0.0f, 15.0f, 0.0f));
+        XMStoreFloat4x4(&gridRitem->instances[0].texTransform, XMMatrixScaling(8.0f, 8.0f, 1.0f));
+        mRenderItemLayer[(int) RenderLayer::Opaque].emplace_back(gridRitem.get());
+        mAllRenderItems.emplace_back(std::move(gridRitem));
+
+        auto cylRitem = std::make_unique<RenderItem>();
+        cylRitem->geo = mGeometries["shapeGeo"].get();
+        cylRitem->mat = mMaterials["bricks2Mat"].get();
+        cylRitem->primitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+        cylRitem->indexCount = cylRitem->geo->DrawArgs["cylinder"].IndexCount;
+        cylRitem->startIndexLocation = cylRitem->geo->DrawArgs["cylinder"].StartIndexLocation;
+        cylRitem->baseVertexLocation = cylRitem->geo->DrawArgs["cylinder"].BaseVertexLocation;
+        cylRitem->boundingBox = cylRitem->geo->DrawArgs["cylinder"].Bounds;
+        cylRitem->instances.resize(10);
+        cylRitem->objCBIndex = mAllInstanceDataCount;
+        mAllInstanceDataCount += 10;
+
+        auto sphereRitem = std::make_unique<RenderItem>();
+        sphereRitem->mat = mMaterials["mirrorMat"].get();
+        sphereRitem->geo = mGeometries["shapeGeo"].get();
+        sphereRitem->primitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+        sphereRitem->indexCount = sphereRitem->geo->DrawArgs["sphere"].IndexCount;
+        sphereRitem->startIndexLocation = sphereRitem->geo->DrawArgs["sphere"].StartIndexLocation;
+        sphereRitem->baseVertexLocation = sphereRitem->geo->DrawArgs["sphere"].BaseVertexLocation;
+        sphereRitem->boundingBox = sphereRitem->geo->DrawArgs["sphere"].Bounds;
+        sphereRitem->instances.resize(10);
+        sphereRitem->objCBIndex = mAllInstanceDataCount;
+        mAllInstanceDataCount += 10;
+
+        XMMATRIX brickTexTransform = XMMatrixScaling(1.5f, 2.0f, 1.0f);
+        for (int i = 0; i < 5; ++i) {
+            XMMATRIX leftCylWorld = XMMatrixTranslation(-5.0f, 16.5f, -10.0f + i * 5.0f);
+            XMMATRIX rightCylWorld = XMMatrixTranslation(+5.0f, 16.5f, -10.0f + i * 5.0f);
+
+            XMMATRIX leftSphereWorld = XMMatrixTranslation(-5.0f, 18.5f, -10.0f + i * 5.0f);
+            XMMATRIX rightSphereWorld = XMMatrixTranslation(+5.0f, 18.5f, -10.0f + i * 5.0f);
+
+            cylRitem->instances[i * 2].materialIndex = cylRitem->mat->MatCBIndex;
+            XMStoreFloat4x4(&cylRitem->instances[i * 2].world, leftCylWorld);
+            XMStoreFloat4x4(&cylRitem->instances[i * 2].texTransform, brickTexTransform);
+
+            cylRitem->instances[i * 2 + 1].materialIndex = cylRitem->mat->MatCBIndex;
+            XMStoreFloat4x4(&cylRitem->instances[i * 2 + 1].world, rightCylWorld);
+            XMStoreFloat4x4(&cylRitem->instances[i * 2 + 1].texTransform, brickTexTransform);
+
+            sphereRitem->instances[i*2].materialIndex = sphereRitem->mat->MatCBIndex;
+            XMStoreFloat4x4(&sphereRitem->instances[i * 2].world, leftSphereWorld);
+
+            sphereRitem->instances[i*2+1].materialIndex = sphereRitem->mat->MatCBIndex;
+            XMStoreFloat4x4(&sphereRitem->instances[i * 2 + 1].world, rightSphereWorld);
+            XMStoreFloat4x4(&sphereRitem->instances[i * 2 + 1].texTransform, brickTexTransform);
+        }
+
+        mRenderItemLayer[(int) RenderLayer::Opaque].push_back(cylRitem.get());
+        mRenderItemLayer[(int) RenderLayer::Opaque].push_back(sphereRitem.get());
+
+        mAllRenderItems.push_back(std::move(cylRitem));
+        mAllRenderItems.push_back(std::move(sphereRitem));
+    }
 }
 
 void LandAndWavesApp::BuildInstanceDataForSkullRenderItem(RenderItem *skullRenderItem)
@@ -1447,8 +1740,8 @@ void LandAndWavesApp::BuildInstanceDataForSkullRenderItem(RenderItem *skullRende
     // Generate instance data.
     const int n = 5;
     auto instanceCount = n * n * n;
-    skullRenderItem->instances.resize(instanceCount+1);
-    
+    skullRenderItem->instances.resize(instanceCount + 1);
+
     float width = 200.0f;
     float height = 200.0f;
     float depth = 200.0f;
@@ -1465,15 +1758,27 @@ void LandAndWavesApp::BuildInstanceDataForSkullRenderItem(RenderItem *skullRende
                 int index = k * n * n + i * n + j + 1;
                 // Position instanced along a 3D grid.
                 skullRenderItem->instances[index].world = XMFLOAT4X4(
-                    1.0f, 0.0f, 0.0f, 0.0f,
-                    0.0f, 1.0f, 0.0f, 0.0f,
-                    0.0f, 0.0f, 1.0f, 0.0f,
-                    x + j * dx, y + i * dy + 5.0f, z + k * dz, 1.0f);
+                    1.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    1.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    1.0f,
+                    0.0f,
+                    x + j * dx,
+                    y + i * dy + 5.0f,
+                    z + k * dz,
+                    1.0f);
 
                 XMStoreFloat4x4(
                     &skullRenderItem->instances[index].texTransform,
                     XMMatrixScaling(2.0f, 2.0f, 1.0f));
-                skullRenderItem->instances[index].materialIndex = index % mMaterials.size();
+                skullRenderItem->instances[index].materialIndex = index % (mMaterials.size()-1);
 
                 mAllInstanceDataCount++;
             }
@@ -1483,11 +1788,12 @@ void LandAndWavesApp::BuildInstanceDataForSkullRenderItem(RenderItem *skullRende
 
 void LandAndWavesApp::BuildMaterial()
 {
+    auto matIndex = 0;
     auto grass = std::make_unique<Material>();
     grass->Name = "grassMat";
-    grass->MatCBIndex = 0;
+    grass->MatCBIndex = matIndex++;
     //grass->DiffuseSrvHeapIndex = 0;
-    grass->DiffuseSrvHeapIndex = mTextureNameToSRVHeapIndex["grassTex"];
+    grass->DiffuseSrvHeapIndex = mDynamicTextureIndex["grassTex"];
     grass->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
     grass->FresnelR0 = XMFLOAT3(0.01f, 0.01f, 0.01f);
     grass->Roughness = 0.125f;
@@ -1495,9 +1801,9 @@ void LandAndWavesApp::BuildMaterial()
 
     auto water = std::make_unique<Material>();
     water->Name = "waterMat";
-    water->MatCBIndex = 1;
+    water->MatCBIndex = matIndex++;
     //water->DiffuseSrvHeapIndex = 1;
-    water->DiffuseSrvHeapIndex = mTextureNameToSRVHeapIndex["water1Tex"];
+    water->DiffuseSrvHeapIndex = mDynamicTextureIndex["water1Tex"];
     water->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 0.5f);
     water->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
     water->Roughness = 0.0f;
@@ -1505,29 +1811,29 @@ void LandAndWavesApp::BuildMaterial()
 
     auto wirefence = std::make_unique<Material>();
     wirefence->Name = "wirefenceMat";
-    wirefence->MatCBIndex = 2;
+    wirefence->MatCBIndex = matIndex++;
     //wirefence->DiffuseSrvHeapIndex = 2;
-    wirefence->DiffuseSrvHeapIndex = mTextureNameToSRVHeapIndex["WireFenceTex"];
+    wirefence->DiffuseSrvHeapIndex = mDynamicTextureIndex["WireFenceTex"];
     wirefence->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
     wirefence->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
     wirefence->Roughness = 0.25f;
     mMaterials[wirefence->Name] = std::move(wirefence);
 
-    auto bricks = std::make_unique<Material>();
-    bricks->Name = "bricksMat";
-    bricks->MatCBIndex = 3;
-    //bricks->DiffuseSrvHeapIndex = 3;
-    bricks->DiffuseSrvHeapIndex = mTextureNameToSRVHeapIndex["bricks3Tex"];
-    bricks->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-    bricks->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
-    bricks->Roughness = 0.25f;
-    mMaterials[bricks->Name] = std::move(bricks);
+    auto bricks3 = std::make_unique<Material>();
+    bricks3->Name = "bricks3Mat";
+    bricks3->MatCBIndex = matIndex++;
+    //bricks3->DiffuseSrvHeapIndex = 3;
+    bricks3->DiffuseSrvHeapIndex = mDynamicTextureIndex["bricks3Tex"];
+    bricks3->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+    bricks3->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
+    bricks3->Roughness = 0.25f;
+    mMaterials[bricks3->Name] = std::move(bricks3);
 
     auto checkertile = std::make_unique<Material>();
     checkertile->Name = "checkertileMat";
-    checkertile->MatCBIndex = 4;
+    checkertile->MatCBIndex = matIndex++;
     //checkertile->DiffuseSrvHeapIndex = 4;
-    checkertile->DiffuseSrvHeapIndex = mTextureNameToSRVHeapIndex["checkboardTex"];
+    checkertile->DiffuseSrvHeapIndex = mDynamicTextureIndex["checkboardTex"];
     checkertile->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
     checkertile->FresnelR0 = XMFLOAT3(0.07f, 0.07f, 0.07f);
     checkertile->Roughness = 0.3f;
@@ -1535,9 +1841,9 @@ void LandAndWavesApp::BuildMaterial()
 
     auto icemirror = std::make_unique<Material>();
     icemirror->Name = "icemirrorMat";
-    icemirror->MatCBIndex = 5;
+    icemirror->MatCBIndex = matIndex++;
     //icemirror->DiffuseSrvHeapIndex = 5;
-    icemirror->DiffuseSrvHeapIndex = mTextureNameToSRVHeapIndex["iceTex"];
+    icemirror->DiffuseSrvHeapIndex = mDynamicTextureIndex["iceTex"];
     icemirror->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 0.3f);
     icemirror->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
     icemirror->Roughness = 0.5f;
@@ -1545,9 +1851,9 @@ void LandAndWavesApp::BuildMaterial()
 
     auto skullMat = std::make_unique<Material>();
     skullMat->Name = "skullMat";
-    skullMat->MatCBIndex = 6;
+    skullMat->MatCBIndex = matIndex++;
     //skullMat->DiffuseSrvHeapIndex = 6;
-    skullMat->DiffuseSrvHeapIndex = mTextureNameToSRVHeapIndex["white1x1Tex"];
+    skullMat->DiffuseSrvHeapIndex = mDynamicTextureIndex["white1x1Tex"];
     skullMat->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
     skullMat->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
     skullMat->Roughness = 0.3f;
@@ -1555,13 +1861,49 @@ void LandAndWavesApp::BuildMaterial()
 
     auto shadowMat = std::make_unique<Material>();
     shadowMat->Name = "shadowMat";
-    shadowMat->MatCBIndex = 7;
+    shadowMat->MatCBIndex = matIndex++;
     //shadowMat->DiffuseSrvHeapIndex = 6;
-    shadowMat->DiffuseSrvHeapIndex = mTextureNameToSRVHeapIndex["white1x1Tex"];
+    shadowMat->DiffuseSrvHeapIndex = mDynamicTextureIndex["white1x1Tex"];
     shadowMat->DiffuseAlbedo = XMFLOAT4(0.0f, 0.0f, 0.0f, 0.5f);
     shadowMat->FresnelR0 = XMFLOAT3(0.001f, 0.001f, 0.001f);
     shadowMat->Roughness = 0.0f;
     mMaterials[shadowMat->Name] = std::move(shadowMat);
+
+    auto skyMat = std::make_unique<Material>();
+    skyMat->Name = "skyMat";
+    skyMat->MatCBIndex = matIndex++;
+    skyMat->DiffuseSrvHeapIndex = 0;
+    skyMat->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+    skyMat->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
+    skyMat->Roughness = 1.0f;
+    mMaterials[skyMat->Name] = std::move(skyMat);
+
+    auto bricks2 = std::make_unique<Material>();
+    bricks2->Name = "bricks2Mat";
+    bricks2->MatCBIndex = matIndex++;
+    bricks2->DiffuseSrvHeapIndex = mDynamicTextureIndex["bricks2Tex"];
+    bricks2->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+    bricks2->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
+    bricks2->Roughness = 0.3f;
+    mMaterials[bricks2->Name] = std::move(bricks2);
+
+    auto tile = std::make_unique<Material>();
+    tile->Name = "tileMat";
+    tile->MatCBIndex = matIndex++;
+    tile->DiffuseSrvHeapIndex = mDynamicTextureIndex["tileTex"];
+    tile->DiffuseAlbedo = XMFLOAT4(0.9f, 0.9f, 0.9f, 1.0f);
+    tile->FresnelR0 = XMFLOAT3(0.2f, 0.2f, 0.2f);
+    tile->Roughness = 0.1f;
+    mMaterials[tile->Name] = std::move(tile);
+
+    auto mirror = std::make_unique<Material>();
+    mirror->Name = "mirrorMat";
+    mirror->MatCBIndex = matIndex++;
+    mirror->DiffuseSrvHeapIndex = mDynamicTextureIndex["white1x1Tex"];
+    mirror->DiffuseAlbedo = XMFLOAT4(0.0f, 0.0f, 0.1f, 1.0f);
+    mirror->FresnelR0 = XMFLOAT3(0.98f, 0.97f, 0.95f);
+    mirror->Roughness = 0.1f;
+    mMaterials[mirror->Name] = std::move(mirror);
 
     /*auto treeSprites = std::make_unique<Material>();
     treeSprites->Name = "treeSpritesMat";
@@ -1576,6 +1918,7 @@ void LandAndWavesApp::BuildMaterial()
 void LandAndWavesApp::LoadTextures()
 {
     std::vector<std::pair<std::string, std::wstring>> texInfo = {
+        {"grasscube1024Tex", L"/Assets/Textures/grasscube1024.dds"},
         {"bricksTex", L"/Assets/Textures/bricks.dds"},
         {"stoneTex", L"/Assets/Textures/stone.dds"},
         {"tileTex", L"/Assets/Textures/tile.dds"},
@@ -1587,6 +1930,7 @@ void LandAndWavesApp::LoadTextures()
         {"WireFenceTex", L"/Assets/Textures/WireFence.dds"},
         {"bricks3Tex", L"/Assets/Textures/bricks3.dds"},
         {"checkboardTex", L"/Assets/Textures/checkboard.dds"},
+        {"bricks2Tex", L"/Assets/Textures/bricks2.dds"},
         //{"treeArray2Tex", L"/Assets/Textures/treeArray2.dds"},
     };
 
@@ -1603,7 +1947,9 @@ void LandAndWavesApp::LoadTextures()
             tex->UploadHeap));
 
         mSRVHeapTexture.emplace_back(tex.get());
-        mTextureNameToSRVHeapIndex.insert({it.first, index++});
+        if (tex->Name != "grasscube1024Tex") {
+            mDynamicTextureIndex.insert({it.first, index++});
+        }
 
         mTextures[it.first] = std::move(tex);
     }

@@ -39,6 +39,7 @@ struct RenderItem
 
 enum class RenderLayer : int { 
     Opaque = 0,
+    Sky,
     Mirrors,
     Reflected,
     Transparent,
@@ -86,6 +87,8 @@ private:
     void BuildRoomGeometry();
     void BuildSkullGeometry();
     void BuildTreeSpritesGeometry();
+
+    void BuildShapeGeometry();
 
     void LoadTextures();
     void BuildMaterial();
@@ -154,6 +157,6 @@ private:
     bool mFrustumCullingEnabled = true;
 
     // 
-    std::unordered_map<std::string, uint32_t> mTextureNameToSRVHeapIndex;
+    std::unordered_map<std::string, uint32_t> mDynamicTextureIndex;
     std::vector<Texture*> mSRVHeapTexture;
 };
