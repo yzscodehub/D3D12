@@ -7,13 +7,15 @@ struct VertexIn
     float3 pos : POSITION;
     float3 normal : NORMAL;
     float2 texCoord : TEXCOORD;
+    float3 tangent : TANGENT;
 };
 
 struct VertexOut
 {
     float4 posH : SV_POSITION;
     float3 posW : POSITION;
-    float3 normal : NORMAL;
+    float3 normalW : NORMAL;
+    float3 tangentW : TANGENT;
     float2 texCoord : TEXCOORD;
     // 带有 nointerpolation 的变量不会根据片元的位置进行插值，而是在整个图元内保持一致
     nointerpolation uint materialIndex : MATERIALINDEX;
@@ -36,7 +38,9 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
     vout.posW = worldPos.xyx;
     
     // TODO 假设这里进行的是等比缩放，否则这里需要使用世界矩阵的逆转置矩阵
-    vout.normal = mul(vin.normal, (float3x3) world);
+    vout.normalW = mul(vin.normal, (float3x3) world);
+    
+    vout.tangentW = mul(vin.tangent, (float3x3) world);
     
     // 将顶点变换到齐次裁剪空间
     vout.posH = mul(worldPos, cbPass.viewProj);
@@ -53,8 +57,16 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
 
 float4 PS(VertexOut pin) : SV_TARGET
 {
+    // 获取材质数据
     MaterialData matData = gMaterialData[pin.materialIndex];
-    float4 diffuseAlbedo = gDiffuseMap[matData.diffuseMapIndex].Sample(gSamAnisotropicWrap, pin.texCoord) * matData.diffuseAlbedo;
+    float4 diffuseAlbedo = matData.diffuseAlbedo;
+    float3 fresnelR0 = matData.fresnelR0;
+    float roughness = matData.roughness;
+    int diffuseMapIndex = matData.diffuseMapIndex;
+    int normalMapIndex = matData.normalMapIndex;
+    
+    // 动态查找数组中的纹理
+    diffuseAlbedo *= gTextureMaps[diffuseMapIndex].Sample(gSamAnisotropicWrap, pin.texCoord);
     
 #ifdef ALPHA_TEST
     // 若alpha < 0.1 则抛弃该像素。我们要在着色器中尽早执行此项测试，以尽快检测出满足条件的像素并退出着色器，从而跳出后续的相关处理
@@ -62,7 +74,13 @@ float4 PS(VertexOut pin) : SV_TARGET
 #endif
     
     // 对法线插值可能导致其非规范化，因此需要再次对它进行规范化处理
-    pin.normal = normalize(pin.normal);
+    pin.normalW = normalize(pin.normalW);
+    
+    // 法线贴图
+    float4 normalMapSample = gTextureMaps[normalMapIndex].Sample(gSamAnisotropicWrap, pin.texCoord);
+    float3 bumpedNormalW = NormalSampleToWorldSpace(normalMapSample, pin.normalW, pin.tangentW);
+    
+    float3 normalW = normalMapIndex != -1 ? bumpedNormalW : pin.normalW;
     
     // 光线经表面上一点反射到观察点的向量
     float3 toEye = cbPass.eyePosW - pin.posW;
@@ -75,7 +93,7 @@ float4 PS(VertexOut pin) : SV_TARGET
     const float shininess = 1.0f - matData.roughness;
     Material mat = { diffuseAlbedo, matData.fresnelR0, shininess };
     float3 shadowFactor = 1.0f;
-    float4 lightingResult = ComputeLighting(cbPass.lights, mat, pin.posW, pin.normal, toEye, shadowFactor);
+    float4 lightingResult = ComputeLighting(cbPass.lights, mat, pin.posW, normalW, toEye, shadowFactor);
     
     float4 litColor = ambient + lightingResult;
     
@@ -85,9 +103,9 @@ float4 PS(VertexOut pin) : SV_TARGET
 #endif
     
     // 加入镜面反射数据
-    float3 r = reflect(-toEye, pin.normal);
+    float3 r = reflect(-toEye, normalW);
     float4 reflectionColor = gCubeMap.Sample(gSamLinearWrap, r);
-    float3 fresnelFactor = SchlickFresnel(matData.fresnelR0, pin.normal, r);
+    float3 fresnelFactor = SchlickFresnel(matData.fresnelR0, normalW, r);
     litColor.rgb += shininess * fresnelFactor * reflectionColor.rgb;
     
     // 从漫反射材质中获取alpha值的常见手段

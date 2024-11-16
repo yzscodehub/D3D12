@@ -33,7 +33,7 @@ struct MaterialData
     float roughness;
     float4x4 matTransform;
     uint diffuseMapIndex;
-    uint matPad0;
+    uint normalMapIndex;
     uint matPad1;
     uint matPad2;
 };
@@ -81,8 +81,29 @@ cbuffer ConstBuffer : register(b0)
     ConstBufferPass cbPass;
 };
 TextureCube gCubeMap : register(t0);
-Texture2D gDiffuseMap[12] : register(t1);
+Texture2D gTextureMaps[15] : register(t1);
 
 StructuredBuffer<InstanceData> gInstanceData : register(t0, space1);
 StructuredBuffer<MaterialData> gMaterialData : register(t1, space1);
 
+
+// 将一个法线图样本变换至世界空间
+float3 NormalSampleToWorldSpace(float4 normalMapSample, float3 unitNormalW, float3 tangentW)
+{
+    // 将每个坐标分量由范围[0,1]解压至[-1,1]
+    float3 normalT = 2.0f * normalMapSample - 1.0f;
+    
+    // 构建正交规范基
+    float3 N = unitNormalW;
+    // 插值完成后，切向量与法向量可能会变为非正交规范向量。
+    // 下面的代码是使T减去N方向上的分量（投影），再对结果进行规范化处理，从而使T成为规范化向量且正交与N
+    float3 T = normalize(tangentW - dot(tangentW, N) * N);
+
+    float3 B = cross(N, T);
+    
+    float3x3 TBN = float3x3(T, B, N);
+    
+    // 将法线样本从切线空间变换到世界空间
+    float3 bumpedNormalW = mul(normalT, TBN);
+    return bumpedNormalW;
+}

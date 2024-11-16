@@ -57,6 +57,7 @@ struct Vertex
     DirectX::XMFLOAT3 pos;
     DirectX::XMFLOAT3 normal;
     DirectX::XMFLOAT2 texCoord;
+    DirectX::XMFLOAT3 tangent;
 };
 
 struct TreeSpriteVertex
@@ -74,8 +75,8 @@ struct MaterialData
     // Used in texture mapping.
     DirectX::XMFLOAT4X4 matTransform = MathHelper::Identity4x4();
 
-    UINT diffuseMapIndex = 0;
-    UINT materialPad0;
+    INT diffuseMapIndex = 0;
+    INT normalMapIndex = 0;
     UINT materialPad1;
     UINT materialPad2;
 };

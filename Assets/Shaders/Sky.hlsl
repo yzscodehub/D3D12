@@ -20,16 +20,16 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
     
     InstanceData instanceData = gInstanceData[instanceID];
     
-    // ÓÃ¾Ö²¿¶¥µãµÄÎ»ÖÃ×÷ÎªÁ¢·½ÌåÍ¼µÄ²éÕÒÏòÁ¿
+    // ç”¨å±€éƒ¨é¡¶ç‚¹çš„ä½ç½®ä½œä¸ºç«‹æ–¹ä½“å›¾çš„æŸ¥æ‰¾å‘é‡
     vout.posL = vin.pos;
     
-    // °Ñ¶¥µã±ä»»µ½ÊÀ½ç¿Õ¼ä
+    // æŠŠé¡¶ç‚¹å˜æ¢åˆ°ä¸–ç•Œç©ºé—´
     float4 posW = mul(float4(vin.pos, 1.0), instanceData.world);
     
-    // ×ÜÊÇÒÔÉãÏñ»ú×÷ÎªÌì¿ÕÇòµÄÖĞĞÄ
+    // æ€»æ˜¯ä»¥æ‘„åƒæœºä½œä¸ºå¤©ç©ºçƒçš„ä¸­å¿ƒ
     posW.xyz += cbPass.eyePosW;
     
-    // ÉèÖÃz=w,´Ó¶øÊ¹z/w=1(¼´ÁîÇòÃæ×ÜÊÇÎ»ÓÚÔ¶Æ½Ãæ)
+    // è®¾ç½®z=w,ä»è€Œä½¿z/w=1(å³ä»¤çƒé¢æ€»æ˜¯ä½äºè¿œå¹³é¢)
     vout.posH = mul(posW, cbPass.viewProj).xyww;
     
     return vout;

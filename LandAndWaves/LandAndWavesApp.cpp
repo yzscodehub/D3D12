@@ -7,6 +7,8 @@
 
 const int gNumFrameResources = 3;
 
+const std::string gSkyBoxTexName("skyBoxTex");
+
 LandAndWavesApp::LandAndWavesApp(HINSTANCE hInstance)
     : D3DApp(hInstance)
 {}
@@ -424,6 +426,7 @@ void LandAndWavesApp::UpdateMaterialBuffer(const GameTimer &gt)
             mc.fresnelR0 = material->FresnelR0;
             mc.roughness = material->Roughness;
             mc.diffuseMapIndex = material->DiffuseSrvHeapIndex;
+            mc.normalMapIndex = material->NormalSrvHeapIndex;
 
             XMMATRIX matTransform = XMLoadFloat4x4(&material->MatTransform);
             XMStoreFloat4x4(&mc.matTransform, XMMatrixTranspose(matTransform));
@@ -1031,24 +1034,28 @@ void LandAndWavesApp::BuildShapeGeometry()
         vertices[k].pos = box.Vertices[i].Position;
         vertices[k].normal = box.Vertices[i].Normal;
         vertices[k].texCoord = box.Vertices[i].TexC;
+        vertices[k].tangent = box.Vertices[i].TangentU;
     }
 
     for (size_t i = 0; i < grid.Vertices.size(); ++i, ++k) {
         vertices[k].pos = grid.Vertices[i].Position;
         vertices[k].normal = grid.Vertices[i].Normal;
         vertices[k].texCoord = grid.Vertices[i].TexC;
+        vertices[k].tangent = grid.Vertices[i].TangentU;
     }
 
     for (size_t i = 0; i < sphere.Vertices.size(); ++i, ++k) {
         vertices[k].pos = sphere.Vertices[i].Position;
         vertices[k].normal = sphere.Vertices[i].Normal;
         vertices[k].texCoord = sphere.Vertices[i].TexC;
+        vertices[k].tangent = sphere.Vertices[i].TangentU;
     }
 
     for (size_t i = 0; i < cylinder.Vertices.size(); ++i, ++k) {
         vertices[k].pos = cylinder.Vertices[i].Position;
         vertices[k].normal = cylinder.Vertices[i].Normal;
         vertices[k].texCoord = cylinder.Vertices[i].TexC;
+        vertices[k].tangent = cylinder.Vertices[i].TangentU;
     }
 
     std::vector<std::uint16_t> indices;
@@ -1107,7 +1114,7 @@ void LandAndWavesApp::BuildDescriptorHeaps()
     srvDesc.Texture2D.MostDetailedMip = 0;
 
     for (const auto it : mSRVHeapTexture) {
-        if (it->Name == "grasscube1024Tex") {
+        if (it->Name == gSkyBoxTexName) {
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;     
         } else {
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; 
@@ -1230,6 +1237,13 @@ void LandAndWavesApp::BuildShadersAndInputLayout()
             DXGI_FORMAT_R32G32_FLOAT,
             0,
             offsetof(Vertex, texCoord),
+            D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+            0},
+           {"TANGENT",
+            0,
+            DXGI_FORMAT_R32G32B32_FLOAT,
+            0,
+            offsetof(Vertex, tangent),
             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
             0}};
 
@@ -1882,6 +1896,7 @@ void LandAndWavesApp::BuildMaterial()
     bricks2->Name = "bricks2Mat";
     bricks2->MatCBIndex = matIndex++;
     bricks2->DiffuseSrvHeapIndex = mDynamicTextureIndex["bricks2Tex"];
+    bricks2->NormalSrvHeapIndex = mDynamicTextureIndex["bricks2_nmapTex"];
     bricks2->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
     bricks2->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
     bricks2->Roughness = 0.3f;
@@ -1891,6 +1906,7 @@ void LandAndWavesApp::BuildMaterial()
     tile->Name = "tileMat";
     tile->MatCBIndex = matIndex++;
     tile->DiffuseSrvHeapIndex = mDynamicTextureIndex["tileTex"];
+    tile->NormalSrvHeapIndex = mDynamicTextureIndex["tile_nmapTex"];
     tile->DiffuseAlbedo = XMFLOAT4(0.9f, 0.9f, 0.9f, 1.0f);
     tile->FresnelR0 = XMFLOAT3(0.2f, 0.2f, 0.2f);
     tile->Roughness = 0.1f;
@@ -1900,6 +1916,7 @@ void LandAndWavesApp::BuildMaterial()
     mirror->Name = "mirrorMat";
     mirror->MatCBIndex = matIndex++;
     mirror->DiffuseSrvHeapIndex = mDynamicTextureIndex["white1x1Tex"];
+    mirror->NormalSrvHeapIndex = mDynamicTextureIndex["default_nmapTex"];
     mirror->DiffuseAlbedo = XMFLOAT4(0.0f, 0.0f, 0.1f, 1.0f);
     mirror->FresnelR0 = XMFLOAT3(0.98f, 0.97f, 0.95f);
     mirror->Roughness = 0.1f;
@@ -1918,7 +1935,7 @@ void LandAndWavesApp::BuildMaterial()
 void LandAndWavesApp::LoadTextures()
 {
     std::vector<std::pair<std::string, std::wstring>> texInfo = {
-        {"grasscube1024Tex", L"/Assets/Textures/grasscube1024.dds"},
+        {gSkyBoxTexName, L"/Assets/Textures/grasscube1024.dds"},
         {"bricksTex", L"/Assets/Textures/bricks.dds"},
         {"stoneTex", L"/Assets/Textures/stone.dds"},
         {"tileTex", L"/Assets/Textures/tile.dds"},
@@ -1931,6 +1948,9 @@ void LandAndWavesApp::LoadTextures()
         {"bricks3Tex", L"/Assets/Textures/bricks3.dds"},
         {"checkboardTex", L"/Assets/Textures/checkboard.dds"},
         {"bricks2Tex", L"/Assets/Textures/bricks2.dds"},
+        {"bricks2_nmapTex", L"/Assets/Textures/bricks2_nmap.dds"},
+        {"tile_nmapTex", L"/Assets/Textures/tile_nmap.dds"},
+        {"default_nmapTex", L"/Assets/Textures/default_nmap.dds"},
         //{"treeArray2Tex", L"/Assets/Textures/treeArray2.dds"},
     };
 
@@ -1947,7 +1967,7 @@ void LandAndWavesApp::LoadTextures()
             tex->UploadHeap));
 
         mSRVHeapTexture.emplace_back(tex.get());
-        if (tex->Name != "grasscube1024Tex") {
+        if (tex->Name != gSkyBoxTexName) {
             mDynamicTextureIndex.insert({it.first, index++});
         }
 
